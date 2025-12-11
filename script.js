@@ -1,2455 +1,1978 @@
 // scrypt.js
-// ЛОГИКА КАЛЬКУЛЯТОРА ЗП СТАРШЕГО ЭКСПЕРТА (SPA, localStorage, календарь, сделки, звонки)
-// -----------------------------------------------------------------------------
-// ВАЖНО: Этот файл отвечает ТОЛЬКО за JS-логику.
-// Разметку и стили ты уже делаешь сам, но ниже я пишу, какие ID/атрибуты ожидаются.
-// Ты можешь адаптировать селекторы под свою HTML-структуру, если нужно.
-//
-// ОЖИДАЕМЫЕ ОСНОВНЫЕ ЭЛЕМЕНТЫ В HTML:
-//
-// 1) Навигация по вкладкам (SPA):
-//    Кнопки/элементы с data-tab-target="#id_вкладки"
-//    Секции/вкладки с атрибутом data-tab-content и соответствующим id:
-//      <section id="tab-calc" data-tab-content></section>
-//      <section id="tab-calendar" data-tab-content></section>
-//      <section id="tab-deals" data-tab-content></section>
-//      div/section id="tab-calls" data-tab-content></section>
-//
-// 2) Вкладка "Подсчет":
-//    - Оклад:   <input id="salary-base-input" type="number">
-//    - Кнопка "План": <button id="btn-open-plan"></button>
-//    - Кнопка "Редактировать цены": <button id="btn-open-prices"></button>
-//    - Тоггл "Сервисный сотрудник": <input id="service-toggle" type="checkbox">
-//    - Вывод общей выручки (без коэффициента):    <span id="total-raw-earnings"></span>
-//    - Вывод дохода с учетом коэффициента:        <span id="total-earnings-with-coef"></span>
-//    - Текущий коэффициент:                       <span id="current-coef"></span>
-//    - Премия (грязная):                          <span id="premium-gross"></span>
-//    - Премия (на руки):                          <span id="premium-net"></span>
-//    - Полки и прогресс по ним (минимум): span'ы
-//      data-shelf-progress="consumer|cards|dk|savings|pension"
-//      data-shelf-earned="consumer|cards|dk|savings|pension"
-//      data-shelf-plan="consumer|cards|dk|savings|pension"
-//
-// 3) Вкладка "Календарь":
-//    - Контейнер дней:     <div id="calendar-grid"></div>
-//    - Контейнер дней недели (опционально): <div id="calendar-weekdays"></div>
-//    - Канвас графика:     <canvas id="sales-chart"></canvas>
-//
-// 4) Вкладка "Мои сделки":
-//    - Селект фильтра полок: <select id="deals-filter"></select>
-//    - Контейнер списка:     <div id="deals-list"></div>
-//
-// 5) Вкладка "Звонки":
-//    - Кнопка "Добавить звонок": <button id="btn-add-call"></button>
-//    - Контейнер списка:         <div id="calls-list"></div>
-//
-// 6) Общие модальные окна:
-//    - Оверлей / контейнер для модалок: <div id="modal-root"></div> (JS сам будет внутрь вставлять)
-//
-// -----------------------------------------------------------------------------
-// ВЕСЬ КОД ЗАВЕРНУТ В IIFE, ЧТОБЫ НЕ МУСОРИТЬ В ГЛОБАЛЬНОЙ ОБЛАСТИ
-// -----------------------------------------------------------------------------
+// Калькулятор ЗП старшего эксперта
+// Вся логика приложения: вкладки, полки, план, календарь, сделки, звонки, localStorage, график.
 
-(function () {
+(() => {
   "use strict";
 
-  // ---------------------------------------------------------------------------
-  // УТИЛИТЫ
-  // ---------------------------------------------------------------------------
+  // ==============================
+  // Константы и пресеты
+  // ==============================
 
-  const LS_KEY = "senior_expert_app_state_v1";
+  const STORAGE_KEY = "bspb-zp-calculator-v1";
 
-  function formatMoney(value) {
-    if (!isFinite(value)) return "0 ₽";
-    return (
-      Math.round((value + Number.EPSILON) * 100) / 100
-    ).toLocaleString("ru-RU", { minimumFractionDigits: 0 }) + " ₽";
-  }
+  const MONTH_NAMES = [
+    "Январь",
+    "Февраль",
+    "Март",
+    "Апрель",
+    "Май",
+    "Июнь",
+    "Июль",
+    "Август",
+    "Сентябрь",
+    "Октябрь",
+    "Ноябрь",
+    "Декабрь",
+  ];
 
-  function formatPercent(value) {
-    if (!isFinite(value)) return "0%";
-    return (Math.round(value * 10) / 10).toLocaleString("ru-RU") + "%";
-  }
+  const WEEKDAY_MON_TO_SUN = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 
-  function formatDateISO(date) {
-    // date: Date
-    return date.toISOString().slice(0, 10); // YYYY-MM-DD
-  }
+  const TAX_RATE = 0.13;
+  const SERVICE_DAY_BONUS = 500;
 
-  function parseISOToDate(iso) {
-    // iso: "YYYY-MM-DD"
-    return new Date(iso + "T00:00:00");
-  }
-
-  function todayISO() {
-    return formatDateISO(new Date());
-  }
-
-  function getCurrentMonthKey() {
-    const now = new Date();
-    return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0"); // YYYY-MM
-  }
-
-  function createElement(tag, options = {}) {
-    const el = document.createElement(tag);
-    if (options.className) el.className = options.className;
-    if (options.text) el.textContent = options.text;
-    if (options.html != null) el.innerHTML = options.html;
-    if (options.attrs) {
-      Object.entries(options.attrs).forEach(([k, v]) => el.setAttribute(k, v));
-    }
-    if (options.children) {
-      options.children.forEach((child) => child && el.appendChild(child));
-    }
-    return el;
-  }
-
-  function generateId(prefix) {
-    return prefix + "_" + Math.random().toString(36).slice(2, 9);
-  }
-
-  // ---------------------------------------------------------------------------
-  // ДЕФОЛТНЫЕ НАСТРОЙКИ ПОЛОК И ЦЕН
-  // ---------------------------------------------------------------------------
-
-  const DEFAULT_STATE = {
-    monthKey: getCurrentMonthKey(),
-    // Оклад
-    salaryBase: 0,
-    // Режим сервисного сотрудника
-    serviceMode: false,
-    // План по полкам (только 5 полок, без коробочного страхования)
-    plan: {
-      consumer: 0,
-      cards: 0,
-      dk: 0,
-      savings: 0,
-      pension: 0,
+  // Описание полок и продуктов
+  // type: "fixed" — фиксированная сумма, "percent" — проценты от суммы страховки
+  const SHELVES_CONFIG = [
+    {
+      id: "consumer_loan",
+      name: "Потребительский кредит",
+      inPlan: true,
+      products: [
+        { id: "consumer_app", name: "Заявка", type: "fixed", value: 0 },
+        { id: "consumer_issue", name: "Выдача", type: "fixed", value: 2500 },
+      ],
     },
-    // Цены/проценты по продуктам
-    prices: {
-      // 1. Потребительский кредит
-      consumer: {
-        loanApplication: 0, // Заявка: 0 ₽
-        loanIssue: 2500, // Выдача: 2500 ₽
-      },
-      // 2. Кредитные карты
-      cards: {
-        withReview: 1000, // С рассмотрением: 1000 ₽
-        split: 400, // Сплит: 400 ₽
-        application: 0, // Заявка: 0 ₽
-      },
-      // 3. Активация ДК
-      dk: {
-        cardIssue: 0, // Выдача карты: 0 ₽
-        taYarkaya: 600, // ТА "Яркой"
-        taOther: 350, // ТА остальным (кроме ЕКП)
-        taEkp: 250, // ТА по ЕКП
-      },
-      // 4. Накопительная полка
-      savings: {
-        deposit: 450, // Вклад
-        savingsAccount: 350, // Накопительный счёт
-        premiumLightIssue: 300, // Выдача Premium Light
-        premiumLightSticker: 49, // Кнопка учёта стикеров Premium Light
-        smsInfo: 70, // СМС информирование
-        leadCpo: 500, // Лид ЦПО
-        leadMortgage: 500, // Лид ипотека
-        cardSafeIns: 100, // Страхование "Карточный сейф"
-      },
-      // 5. Коробочное страхование (проценты от суммы)
-      box: {
-        general: 8, // Стандартное: 8% от суммы
-        promo: 1, // Акционное: 1%
-        standard: 3, // Стандартное: 3%
-      },
-      // 6. Перевод пенсии
-      pension: {
-        insurance: 1500, // Страховая пенсия
-        military: 1500, // Военная пенсия
-      },
+    {
+      id: "credit_cards",
+      name: "Кредитные карты",
+      inPlan: true,
+      products: [
+        {
+          id: "card_review",
+          name: "С рассмотрением",
+          type: "fixed",
+          value: 1000,
+        },
+        { id: "card_split", name: "Сплит", type: "fixed", value: 400 },
+        { id: "card_app", name: "Заявка", type: "fixed", value: 0 },
+      ],
     },
-    // Продажи по дням: { "YYYY-MM-DD": { isWeekend: bool, sales:[...] } }
-    days: {},
-    // Звонки: массив
-    calls: [],
+    {
+      id: "debit_activation",
+      name: "Активация ДК",
+      inPlan: true,
+      products: [
+        { id: "dk_issue", name: "Выдача карты", type: "fixed", value: 0 },
+        {
+          id: "dk_yarkaya",
+          name: 'ТА по "Яркой"',
+          type: "fixed",
+          value: 600,
+        },
+        {
+          id: "dk_other",
+          name: "ТА по остальным (кроме ЕКП)",
+          type: "fixed",
+          value: 350,
+        },
+        {
+          id: "dk_ekp",
+          name: "ТА по ЕКП",
+          type: "fixed",
+          value: 250,
+        },
+      ],
+    },
+    {
+      id: "savings",
+      name: "Накопительная полка",
+      inPlan: true,
+      products: [
+        { id: "deposit", name: "Вклад", type: "fixed", value: 450 },
+        {
+          id: "savings_account",
+          name: "Накопительный счёт",
+          type: "fixed",
+          value: 350,
+        },
+        {
+          id: "premium_light_issue",
+          name: "Выдача Premium Light",
+          type: "fixed",
+          value: 300,
+        },
+        {
+          id: "premium_light_sticker",
+          name: "Кнопка учёта стикеров Premium Light",
+          type: "fixed",
+          value: 49,
+        },
+        {
+          id: "sms_info",
+          name: "СМС-информирование",
+          type: "fixed",
+          value: 70,
+        },
+        { id: "lead_cpo", name: "Лид ЦПО", type: "fixed", value: 500 },
+        {
+          id: "lead_mortgage",
+          name: "Лид ипотека",
+          type: "fixed",
+          value: 500,
+        },
+        {
+          id: "card_safe",
+          name: 'Страхование "Карточный сейф"',
+          type: "fixed",
+          value: 100,
+        },
+      ],
+    },
+    {
+      id: "box_insurance",
+      name: "Коробочное страхование",
+      inPlan: false, // В плане не участвует
+      products: [
+        {
+          id: "box_standard",
+          name: "Стандартное (8% от суммы)",
+          type: "percent",
+          value: 8,
+        },
+        {
+          id: "box_promo",
+          name: "Акционное (1% от суммы)",
+          type: "percent",
+          value: 1,
+        },
+        {
+          id: "box_credit_standard",
+          name: "Стандартное (3% от суммы)",
+          type: "percent",
+          value: 3,
+        },
+      ],
+    },
+    {
+      id: "pension",
+      name: "Перевод пенсии",
+      inPlan: true,
+      products: [
+        {
+          id: "pension_insurance",
+          name: "Страховая пенсия",
+          type: "fixed",
+          value: 1500,
+        },
+        {
+          id: "pension_military",
+          name: "Военная пенсия",
+          type: "fixed",
+          value: 1500,
+        },
+      ],
+    },
+  ];
+
+  const PLAN_SHELF_IDS = SHELVES_CONFIG.filter((s) => s.inPlan).map(
+    (s) => s.id
+  );
+
+  // ==============================
+  // Утилиты
+  // ==============================
+
+  const qs = (sel) => document.querySelector(sel);
+  const qsa = (sel) => Array.from(document.querySelectorAll(sel));
+
+  const formatCurrency = (value) =>
+    `${Math.round(value).toLocaleString("ru-RU")} ₽`;
+
+  const clampNumber = (n) =>
+    Number.isFinite(n) && n >= 0 ? n : 0;
+
+  const getMonthKey = (year, monthIndex) =>
+    `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+
+  const parseNumberInput = (input) => {
+    if (!input) return 0;
+    const val = parseFloat(String(input).replace(",", "."));
+    return Number.isFinite(val) && val >= 0 ? val : 0;
   };
 
-  // ---------------------------------------------------------------------------
-  // РАБОТА С localStorage
-  // ---------------------------------------------------------------------------
+  const genId = () =>
+    `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+  // Цвет для прогресса плана
+  function getProgressColor(percent) {
+    const p = Math.max(0, Math.min(percent, 100));
+    const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+    const rgbToCss = (r, g, b) => `rgb(${r}, ${g}, ${b})`;
+
+    const red = [242, 95, 92];
+    const yellow = [255, 193, 7];
+    const green = [46, 204, 113];
+
+    if (p <= 80) {
+      const t = p / 80;
+      const r = lerp(red[0], yellow[0], t);
+      const g = lerp(red[1], yellow[1], t);
+      const b = lerp(red[2], yellow[2], t);
+      return rgbToCss(r, g, b);
+    }
+
+    const t = (p - 80) / 20;
+    const r = lerp(yellow[0], green[0], t);
+    const g = lerp(yellow[1], green[1], t);
+    const b = lerp(yellow[2], green[2], t);
+    return rgbToCss(r, g, b);
+  }
+
+  function formatDateRu(dateStr) {
+    const [y, m, d] = dateStr.split("-").map((v) => parseInt(v, 10));
+    const dt = new Date(y, m - 1, d);
+    const monthNamesGen = [
+      "января",
+      "февраля",
+      "марта",
+      "апреля",
+      "мая",
+      "июня",
+      "июля",
+      "августа",
+      "сентября",
+      "октября",
+      "ноября",
+      "декабря",
+    ];
+    return `${d} ${monthNamesGen[dt.getMonth()]} ${dt.getFullYear()}`;
+  }
+
+  // ==============================
+  // Работа с localStorage
+  // ==============================
+
+  function getDefaultState() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const monthKey = getMonthKey(year, month);
+
+    // Заготовка плана: 0 по всем полкам
+    const emptyPlan = {};
+    PLAN_SHELF_IDS.forEach((id) => {
+      emptyPlan[id] = 0;
+    });
+
+    return {
+      salary: 0,
+      serviceWorker: false,
+      currentYear: year,
+      currentMonth: month,
+      // переопределённые цены
+      pricesOverrides: {},
+      // планы по месяцам: { 'YYYY-MM': { shelfId: number } }
+      plans: {
+        [monthKey]: emptyPlan,
+      },
+      // продажи
+      sales: [],
+      // выходные дни: { 'YYYY-MM-DD': true }
+      weekends: {},
+      // звонки
+      calls: [],
+    };
+  }
 
   function loadState() {
     try {
-      const raw = localStorage.getItem(LS_KEY);
-      if (!raw) return structuredClone(DEFAULT_STATE);
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return getDefaultState();
       const parsed = JSON.parse(raw);
 
-      // Если месяц сменился — план сбрасываем, остальное оставляем
-      const currentMonth = getCurrentMonthKey();
-      if (parsed.monthKey !== currentMonth) {
-        parsed.monthKey = currentMonth;
-        parsed.plan = structuredClone(DEFAULT_STATE.plan);
-      }
-
-      // Защита на случай отсутствующих полей
+      const defaults = getDefaultState();
+      // мягкий merge
       return {
-        ...structuredClone(DEFAULT_STATE),
+        ...defaults,
         ...parsed,
-        plan: { ...structuredClone(DEFAULT_STATE.plan), ...(parsed.plan || {}) },
-        prices: mergeDeep(structuredClone(DEFAULT_STATE.prices), parsed.prices || {}),
+        pricesOverrides: {
+          ...defaults.pricesOverrides,
+          ...(parsed.pricesOverrides || {}),
+        },
+        plans: {
+          ...defaults.plans,
+          ...(parsed.plans || {}),
+        },
+        sales: parsed.sales || [],
+        weekends: parsed.weekends || {},
+        calls: parsed.calls || [],
       };
     } catch (e) {
-      console.warn("Ошибка загрузки состояния, используем дефолт:", e);
-      return structuredClone(DEFAULT_STATE);
+      console.error("Ошибка чтения state:", e);
+      return getDefaultState();
     }
-  }
-
-  function mergeDeep(target, source) {
-    if (typeof source !== "object" || source === null) return target;
-    Object.keys(source).forEach((key) => {
-      if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key])) {
-        if (!target[key]) target[key] = {};
-        mergeDeep(target[key], source[key]);
-      } else {
-        target[key] = source[key];
-      }
-    });
-    return target;
   }
 
   function saveState() {
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
-      console.error("Ошибка сохранения в localStorage:", e);
+      console.error("Ошибка сохранения state:", e);
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // ГЛОБАЛЬНОЕ СОСТОЯНИЕ В ПАМЯТИ
-  // ---------------------------------------------------------------------------
+  function resetState() {
+    state = getDefaultState();
+    saveState();
+    rerenderAll();
+    showToast("Данные сброшены", "info");
+  }
+
+  // ==============================
+  // Глобальный state
+  // ==============================
 
   let state = loadState();
 
-  // ---------------------------------------------------------------------------
-  // ТАБЫ / SPA
-  // ---------------------------------------------------------------------------
+  // Текущий просмотримый месяц
+  let currentYear = state.currentYear;
+  let currentMonth = state.currentMonth; // 0-11
 
-  function initTabs() {
-    const tabButtons = document.querySelectorAll("[data-tab-target]");
-    const tabContents = document.querySelectorAll("[data-tab-content]");
+  // Текущий выбранный день в модалке
+  let currentDayDate = null; // 'YYYY-MM-DD'
 
-    function activateTab(targetId) {
-      tabContents.forEach((c) => {
-        c.classList.toggle("is-active", "#" + c.id === targetId);
-      });
-      tabButtons.forEach((btn) => {
-        const t = btn.getAttribute("data-tab-target");
-        btn.classList.toggle("is-active", t === targetId);
-      });
-    }
+  // ID продажи, которую собираемся удалить (через confirm-modal)
+  let pendingDeleteSaleId = null;
 
-    tabButtons.forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const target = btn.getAttribute("data-tab-target");
-        if (!target) return;
-        activateTab(target);
-      });
-    });
+  // ==============================
+  // Кэш DOM
+  // ==============================
 
-    // По умолчанию активируем первую вкладку, если ничего не активно
-    if (!document.querySelector("[data-tab-content].is-active") && tabContents[0]) {
-      activateTab("#" + tabContents[0].id);
-    }
+  // Вкладки
+  const tabButtons = qsa(".tab-btn");
+  const tabPanels = qsa(".tab-panel");
+
+  // Шапка
+  const editPricesBtn = qs("#edit-prices-btn");
+  const resetDataBtn = qs("#reset-data-btn");
+
+  // Общий итог
+  const salaryInput = qs("#salary-input");
+  const serviceWorkerToggle = qs("#service-worker-toggle");
+  const earnTotalEl = qs("#earn-total");
+  const earnServiceEl = qs("#earn-service");
+  const coefValueEl = qs("#coef-value");
+  const bonusGrossEl = qs("#bonus-gross");
+  const bonusNetEl = qs("#bonus-net");
+  const totalWithSalaryEl = qs("#total-with-salary");
+
+  // План
+  const editPlanBtn = qs("#edit-plan-btn");
+  const planProgressContainer = qs("#plan-progress-container");
+
+  // Полки и продукты
+  const shelvesInfoContainer = qs("#shelves-info-container");
+
+  // Календарь
+  const calendarMonthLabel = qs("#calendar-month-label");
+  const prevMonthBtn = qs("#prev-month-btn");
+  const nextMonthBtn = qs("#next-month-btn");
+  const todayMonthBtn = qs("#today-month-btn");
+  const calendarGrid = qs("#calendar-grid");
+  const salesChartCanvas = qs("#sales-chart");
+
+  // Мои сделки
+  const dealsShelfFilter = qs("#deals-shelf-filter");
+  const dealsList = qs("#deals-list");
+
+  // Звонки
+  const addCallBtn = qs("#add-call-btn");
+  const callsList = qs("#calls-list");
+
+  // Модалки
+  const dayModal = qs("#day-modal");
+  const dayModalTitle = qs("#day-modal-title");
+  const dayTotalAmountEl = qs("#day-total-amount");
+  const dayWeekendToggle = qs("#day-weekend-toggle");
+  const daySalesList = qs("#day-sales-list");
+  const daySaleForm = qs("#day-sale-form");
+  const saleShelfSelect = qs("#sale-shelf-select");
+  const saleProductSelect = qs("#sale-product-select");
+  const saleProductWrapper = qs("#sale-product-wrapper");
+  const saleInsuranceSumWrapper = qs("#sale-insurance-sum-wrapper");
+  const saleInsuranceSumInput = qs("#sale-insurance-sum");
+  const saleCommentInput = qs("#sale-comment");
+  const saleEditIdInput = qs("#sale-edit-id");
+  const daySaleCancelEditBtn = qs("#day-sale-cancel-edit-btn");
+
+  const pricesModal = qs("#prices-modal");
+  const pricesModalBody = qs("#prices-modal-body");
+  const pricesSaveBtn = qs("#prices-save-btn");
+
+  const planModal = qs("#plan-modal");
+  const planModalBody = qs("#plan-modal-body");
+  const planSaveBtn = qs("#plan-save-btn");
+
+  const dealDetailsModal = qs("#deal-details-modal");
+  const dealDetailsBody = qs("#deal-details-body");
+  const dealDetailsEditBtn = qs("#deal-details-edit-btn");
+  const dealDetailsDeleteBtn = qs("#deal-details-delete-btn");
+
+  const callModal = qs("#call-modal");
+  const callForm = qs("#call-form");
+  const callResultSelect = qs("#call-result");
+  const callReasonWrapper = qs("#call-reason-wrapper");
+  const callReasonSelect = qs("#call-reason");
+  const callCommentWrapper = qs("#call-comment-wrapper");
+  const callCommentInput = qs("#call-comment");
+
+  const confirmModal = qs("#confirm-modal");
+  const confirmYesBtn = qs("#confirm-yes-btn");
+  const confirmNoBtn = qs("#confirm-no-btn");
+
+  const toastContainer = qs("#toast-container");
+
+  // ==============================
+  // Модалки и тосты
+  // ==============================
+
+  function openModal(id) {
+    const modal = qs(`#${id}`);
+    if (!modal) return;
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
   }
 
-  // ---------------------------------------------------------------------------
-  // МОДАЛЬНЫЕ ОКНА (общий механизм)
-  // ---------------------------------------------------------------------------
-
-  function getModalRoot() {
-    let root = document.getElementById("modal-root");
-    if (!root) {
-      root = createElement("div", { attrs: { id: "modal-root" } });
-      document.body.appendChild(root);
-    }
-    return root;
+  function closeModal(id) {
+    const modal = qs(`#${id}`);
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
   }
 
-  function openModal(contentEl, options = {}) {
-    const root = getModalRoot();
-    const backdrop = createElement("div", {
-      className: "modal-backdrop",
-    });
-    const modal = createElement("div", { className: "modal-shell" });
-
-    if (options.maxWidth) {
-      modal.style.maxWidth = options.maxWidth;
-    }
-
-    modal.appendChild(contentEl);
-    backdrop.appendChild(modal);
-    root.appendChild(backdrop);
-
-    function close() {
-      backdrop.remove();
-      if (typeof options.onClose === "function") options.onClose();
-    }
-
-    backdrop.addEventListener("click", (e) => {
-      if (e.target === backdrop && !options.disableBackdropClose) {
-        close();
+  function attachModalGlobalHandlers() {
+    // Клик по бэкдропу
+    qsa(".modal").forEach((modal) => {
+      const backdrop = modal.querySelector(".modal-backdrop");
+      if (backdrop) {
+        backdrop.addEventListener("click", () => {
+          modal.classList.add("hidden");
+          modal.setAttribute("aria-hidden", "true");
+        });
       }
     });
 
-    return { close, backdrop, modal };
-  }
-
-  function openConfirmDialog(message, onConfirm) {
-    const content = createElement("div", {
-      className: "modal-card",
-    });
-
-    const title = createElement("h3", {
-      className: "modal-title",
-      text: "Подтверждение",
-    });
-
-    const text = createElement("p", {
-      className: "modal-text",
-      text: message || "Вы точно хотите удалить?",
-    });
-
-    const buttonsRow = createElement("div", {
-      className: "modal-actions",
-    });
-
-    const btnYes = createElement("button", {
-      className: "btn btn-danger",
-      text: "Да",
-    });
-    const btnNo = createElement("button", {
-      className: "btn btn-secondary",
-      text: "Нет",
-    });
-
-    buttonsRow.appendChild(btnYes);
-    buttonsRow.appendChild(btnNo);
-
-    content.appendChild(title);
-    content.appendChild(text);
-    content.appendChild(buttonsRow);
-
-    const { close } = openModal(content, { maxWidth: "360px" });
-
-    btnYes.addEventListener("click", () => {
-      if (typeof onConfirm === "function") onConfirm();
-      close();
-    });
-
-    btnNo.addEventListener("click", () => {
-      close();
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // ПЛАН ПО ПОЛКАМ
-  // ---------------------------------------------------------------------------
-
-  const SHELVES_META = {
-    consumer: { label: "Потребительский кредит" },
-    cards: { label: "Кредитные карты" },
-    dk: { label: "Активация ДК" },
-    savings: { label: "Накопительная полка" },
-    pension: { label: "Перевод пенсии" },
-  };
-
-  function openPlanModal() {
-    const content = createElement("div", { className: "modal-card" });
-    const title = createElement("h3", {
-      className: "modal-title",
-      text: "План по полкам (за месяц)",
-    });
-
-    const form = createElement("form", {
-      className: "modal-form",
-    });
-
-    Object.entries(SHELVES_META).forEach(([key, meta]) => {
-      const wrapper = createElement("div", { className: "form-row" });
-      const label = createElement("label", {
-        className: "form-label",
-        text: meta.label,
+    // Кнопки с data-close-modal
+    qsa("[data-close-modal]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const targetId = btn.getAttribute("data-close-modal");
+        if (targetId) closeModal(targetId);
       });
-      const input = createElement("input", {
-        className: "form-input",
-        attrs: { type: "number", min: "0", step: "1", "data-plan-shelf": key },
-      });
-      input.value = state.plan[key] ?? 0;
-      wrapper.appendChild(label);
-      wrapper.appendChild(input);
-      form.appendChild(wrapper);
-    });
-
-    const helpText = createElement("p", {
-      className: "form-help",
-      text: "План действует с 1 по последнее число текущего месяца. В новом месяце план обнуляется, а данные продаж и цены сохраняются.",
-    });
-
-    const actions = createElement("div", { className: "modal-actions" });
-    const btnSave = createElement("button", {
-      className: "btn btn-primary",
-      text: "Сохранить план",
-      attrs: { type: "submit" },
-    });
-
-    const btnCancel = createElement("button", {
-      className: "btn btn-secondary",
-      text: "Отмена",
-      attrs: { type: "button" },
-    });
-
-    actions.appendChild(btnSave);
-    actions.appendChild(btnCancel);
-
-    content.appendChild(title);
-    content.appendChild(form);
-    content.appendChild(helpText);
-    content.appendChild(actions);
-
-    const { close } = openModal(content, { maxWidth: "480px" });
-
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const inputs = form.querySelectorAll("input[data-plan-shelf]");
-      inputs.forEach((input) => {
-        const shelf = input.getAttribute("data-plan-shelf");
-        let value = parseFloat(input.value.replace(",", "."));
-        if (!isFinite(value) || value < 0) value = 0;
-        state.plan[shelf] = value;
-      });
-      state.monthKey = getCurrentMonthKey();
-      saveState();
-      recalcAndRenderAll();
-      close();
-    });
-
-    btnCancel.addEventListener("click", () => {
-      close();
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // РЕДАКТИРОВАНИЕ ЦЕН ПО ПРОДУКТАМ
-  // ---------------------------------------------------------------------------
+  function showToast(message, type = "info") {
+    if (!toastContainer) return;
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    toastContainer.appendChild(toast);
 
-  function openPricesModal() {
-    const content = createElement("div", { className: "modal-card" });
-    const title = createElement("h3", {
-      className: "modal-title",
-      text: "Настройка цен и процентов по продуктам",
+    requestAnimationFrame(() => {
+      toast.classList.add("visible");
     });
 
-    const form = createElement("form", {
-      className: "modal-form modal-form-scroll",
-    });
-
-    // Потребительский кредит
-    const blockConsumer = createElement("div", { className: "prices-block" });
-    blockConsumer.appendChild(
-      createElement("h4", { className: "block-title", text: "Потребительский кредит" })
-    );
-    blockConsumer.appendChild(
-      createPriceRow(
-        "Заявка",
-        "consumer",
-        "loanApplication",
-        state.prices.consumer.loanApplication,
-        "₽ за штуку"
-      )
-    );
-    blockConsumer.appendChild(
-      createPriceRow(
-        "Выдача",
-        "consumer",
-        "loanIssue",
-        state.prices.consumer.loanIssue,
-        "₽ за штуку"
-      )
-    );
-    form.appendChild(blockConsumer);
-
-    // Кредитные карты
-    const blockCards = createElement("div", { className: "prices-block" });
-    blockCards.appendChild(
-      createElement("h4", { className: "block-title", text: "Кредитные карты" })
-    );
-    blockCards.appendChild(
-      createPriceRow(
-        "С рассмотрением",
-        "cards",
-        "withReview",
-        state.prices.cards.withReview,
-        "₽ за штуку"
-      )
-    );
-    blockCards.appendChild(
-      createPriceRow("Сплит", "cards", "split", state.prices.cards.split, "₽ за штуку")
-    );
-    blockCards.appendChild(
-      createPriceRow(
-        "Заявка",
-        "cards",
-        "application",
-        state.prices.cards.application,
-        "₽ за штуку"
-      )
-    );
-    form.appendChild(blockCards);
-
-    // Активация ДК
-    const blockDk = createElement("div", { className: "prices-block" });
-    blockDk.appendChild(
-      createElement("h4", { className: "block-title", text: "Активация ДК" })
-    );
-    blockDk.appendChild(
-      createPriceRow(
-        "Выдача карты",
-        "dk",
-        "cardIssue",
-        state.prices.dk.cardIssue,
-        "₽ за штуку"
-      )
-    );
-    blockDk.appendChild(
-      createPriceRow(
-        'ТА по "Яркой"',
-        "dk",
-        "taYarkaya",
-        state.prices.dk.taYarkaya,
-        "₽ за штуку"
-      )
-    );
-    blockDk.appendChild(
-      createPriceRow(
-        "ТА по остальным (кроме ЕКП)",
-        "dk",
-        "taOther",
-        state.prices.dk.taOther,
-        "₽ за штуку"
-      )
-    );
-    blockDk.appendChild(
-      createPriceRow(
-        "ТА по ЕКП",
-        "dk",
-        "taEkp",
-        state.prices.dk.taEkp,
-        "₽ за штуку"
-      )
-    );
-    form.appendChild(blockDk);
-
-    // Накопительная полка
-    const blockSavings = createElement("div", { className: "prices-block" });
-    blockSavings.appendChild(
-      createElement("h4", { className: "block-title", text: "Накопительная полка" })
-    );
-    blockSavings.appendChild(
-      createPriceRow("Вклад", "savings", "deposit", state.prices.savings.deposit, "₽")
-    );
-    blockSavings.appendChild(
-      createPriceRow(
-        "Накопительный счёт",
-        "savings",
-        "savingsAccount",
-        state.prices.savings.savingsAccount,
-        "₽"
-      )
-    );
-    blockSavings.appendChild(
-      createPriceRow(
-        "Выдача Premium Light",
-        "savings",
-        "premiumLightIssue",
-        state.prices.savings.premiumLightIssue,
-        "₽"
-      )
-    );
-    blockSavings.appendChild(
-      createPriceRow(
-        "Кнопка учёта стикеров Premium Light",
-        "savings",
-        "premiumLightSticker",
-        state.prices.savings.premiumLightSticker,
-        "₽"
-      )
-    );
-    blockSavings.appendChild(
-      createPriceRow(
-        "СМС-информирование",
-        "savings",
-        "smsInfo",
-        state.prices.savings.smsInfo,
-        "₽"
-      )
-    );
-    blockSavings.appendChild(
-      createPriceRow(
-        "Лид ЦПО",
-        "savings",
-        "leadCpo",
-        state.prices.savings.leadCpo,
-        "₽"
-      )
-    );
-    blockSavings.appendChild(
-      createPriceRow(
-        "Лид ипотека",
-        "savings",
-        "leadMortgage",
-        state.prices.savings.leadMortgage,
-        "₽"
-      )
-    );
-    blockSavings.appendChild(
-      createPriceRow(
-        'Страхование "Карточный сейф"',
-        "savings",
-        "cardSafeIns",
-        state.prices.savings.cardSafeIns,
-        "₽"
-      )
-    );
-    form.appendChild(blockSavings);
-
-    // Коробочное страхование
-    const blockBox = createElement("div", { className: "prices-block" });
-    blockBox.appendChild(
-      createElement("h4", {
-        className: "block-title",
-        text: "Коробочное страхование (проценты от суммы)",
-      })
-    );
-    blockBox.appendChild(
-      createPriceRow(
-        "Стандартное (без общих условий)",
-        "box",
-        "general",
-        state.prices.box.general,
-        "% от суммы"
-      )
-    );
-    blockBox.appendChild(
-      createPriceRow(
-        "Акционное (со снижением ставки)",
-        "box",
-        "promo",
-        state.prices.box.promo,
-        "% от суммы"
-      )
-    );
-    blockBox.appendChild(
-      createPriceRow(
-        "Стандартное (без снижения ставки)",
-        "box",
-        "standard",
-        state.prices.box.standard,
-        "% от суммы"
-      )
-    );
-    form.appendChild(blockBox);
-
-    // Перевод пенсии
-    const blockPension = createElement("div", { className: "prices-block" });
-    blockPension.appendChild(
-      createElement("h4", {
-        className: "block-title",
-        text: "Перевод пенсии",
-      })
-    );
-    blockPension.appendChild(
-      createPriceRow(
-        "Страховая пенсия",
-        "pension",
-        "insurance",
-        state.prices.pension.insurance,
-        "₽"
-      )
-    );
-    blockPension.appendChild(
-      createPriceRow(
-        "Военная пенсия",
-        "pension",
-        "military",
-        state.prices.pension.military,
-        "₽"
-      )
-    );
-    form.appendChild(blockPension);
-
-    const actions = createElement("div", { className: "modal-actions" });
-    const btnSave = createElement("button", {
-      className: "btn btn-primary",
-      text: "Сохранить",
-      attrs: { type: "submit" },
-    });
-    const btnCancel = createElement("button", {
-      className: "btn btn-secondary",
-      text: "Отмена",
-      attrs: { type: "button" },
-    });
-
-    actions.appendChild(btnSave);
-    actions.appendChild(btnCancel);
-
-    content.appendChild(title);
-    content.appendChild(form);
-    content.appendChild(actions);
-
-    const { close } = openModal(content, { maxWidth: "640px" });
-
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      const inputs = form.querySelectorAll("[data-price-shelf][data-price-key]");
-      inputs.forEach((input) => {
-        const shelf = input.getAttribute("data-price-shelf");
-        const key = input.getAttribute("data-price-key");
-        let value = parseFloat(input.value.replace(",", "."));
-        if (!isFinite(value) || value < 0) value = 0;
-        if (!state.prices[shelf]) state.prices[shelf] = {};
-        state.prices[shelf][key] = value;
-      });
-      saveState();
-      recalcAndRenderAll();
-      close();
-    });
-
-    btnCancel.addEventListener("click", () => {
-      close();
-    });
+    setTimeout(() => {
+      toast.classList.remove("visible");
+      setTimeout(() => {
+        toast.remove();
+      }, 300);
+    }, 2800);
   }
 
-  function createPriceRow(labelText, shelfKey, priceKey, value, unitText) {
-    const row = createElement("div", { className: "form-row" });
-    const label = createElement("label", { className: "form-label", text: labelText });
-    const inputWrap = createElement("div", { className: "input-with-unit" });
-
-    const input = createElement("input", {
-      className: "form-input",
-      attrs: {
-        type: "number",
-        step: "0.01",
-        min: "0",
-        "data-price-shelf": shelfKey,
-        "data-price-key": priceKey,
-      },
-    });
-    input.value = value;
-
-    const unit = createElement("span", { className: "input-unit", text: unitText });
-    inputWrap.appendChild(input);
-    inputWrap.appendChild(unit);
-
-    row.appendChild(label);
-    row.appendChild(inputWrap);
-    return row;
+  // Подтверждение удаления продажи
+  function askDeleteSale(saleId) {
+    pendingDeleteSaleId = saleId;
+    openModal("confirm-modal");
   }
 
-  // ---------------------------------------------------------------------------
-  // ПРОДАЖИ / ДНИ
-  // ---------------------------------------------------------------------------
+  // ==============================
+  // Работа с ценами
+  // ==============================
 
-  function getDayState(dateIso) {
-    if (!state.days[dateIso]) {
-      state.days[dateIso] = { isWeekend: false, sales: [] };
+  // Текущая цена/процент для продукта с учётом overrides
+  function getProductValue(shelfId, productId) {
+    const shelf = SHELVES_CONFIG.find((s) => s.id === shelfId);
+    if (!shelf) return 0;
+    const product = shelf.products.find((p) => p.id === productId);
+    if (!product) return 0;
+
+    const overrideShelf = state.pricesOverrides[shelfId];
+    if (overrideShelf && typeof overrideShelf[productId] === "number") {
+      return overrideShelf[productId];
     }
-    return state.days[dateIso];
+    return product.value;
   }
 
-  function setDayWeekend(dateIso, isWeekend) {
-    const day = getDayState(dateIso);
-    day.isWeekend = !!isWeekend;
-    saveState();
-    recalcAndRenderAll();
+  function setProductOverrideValue(shelfId, productId, value) {
+    if (!state.pricesOverrides[shelfId]) {
+      state.pricesOverrides[shelfId] = {};
+    }
+    state.pricesOverrides[shelfId][productId] = value;
   }
 
-  function addSale(sale) {
-    const day = getDayState(sale.date);
-    day.sales.push(sale);
-    saveState();
-    recalcAndRenderAll();
-  }
+  // ==============================
+  // План по полкам
+  // ==============================
 
-  function updateSale(saleId, updater) {
-    let changed = false;
-    Object.values(state.days).forEach((day) => {
-      day.sales.forEach((sale) => {
-        if (sale.id === saleId) {
-          updater(sale);
-          changed = true;
-        }
+  function ensureMonthPlan(year, monthIndex) {
+    const key = getMonthKey(year, monthIndex);
+    if (!state.plans[key]) {
+      const empty = {};
+      PLAN_SHELF_IDS.forEach((id) => {
+        empty[id] = 0;
       });
+      state.plans[key] = empty;
+    }
+    return state.plans[key];
+  }
+
+  function getCurrentMonthPlan() {
+    return ensureMonthPlan(currentYear, currentMonth);
+  }
+
+  function renderPlanModal() {
+    const monthPlan = getCurrentMonthPlan();
+    planModalBody.innerHTML = "";
+
+    PLAN_SHELF_IDS.forEach((shelfId) => {
+      const shelf = SHELVES_CONFIG.find((s) => s.id === shelfId);
+      const row = document.createElement("div");
+      row.className = "plan-modal-row";
+
+      const label = document.createElement("label");
+      label.className = "field-label";
+      label.setAttribute("for", `plan-input-${shelfId}`);
+      label.textContent = shelf ? shelf.name : shelfId;
+
+      const inputWrap = document.createElement("div");
+      inputWrap.className = "field";
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.step = "1000";
+      input.id = `plan-input-${shelfId}`;
+      input.value = monthPlan[shelfId] || 0;
+      input.inputMode = "decimal";
+
+      inputWrap.appendChild(input);
+      row.appendChild(label);
+      row.appendChild(inputWrap);
+      planModalBody.appendChild(row);
     });
-    if (changed) {
-      saveState();
-      recalcAndRenderAll();
+  }
+
+  function savePlanFromModal() {
+    const monthPlan = getCurrentMonthPlan();
+    PLAN_SHELF_IDS.forEach((shelfId) => {
+      const input = qs(`#plan-input-${shelfId}`);
+      if (!input) return;
+      const val = parseNumberInput(input.value);
+      monthPlan[shelfId] = val;
+    });
+    saveState();
+    renderPlanProgress();
+    recalcSummary();
+    showToast("План сохранён", "success");
+  }
+
+  function computeShelfEarningsForMonth(shelfId, year, monthIndex) {
+    const monthKey = getMonthKey(year, monthIndex);
+    return state.sales
+      .filter((s) => s.shelfId === shelfId && s.date.startsWith(monthKey))
+      .reduce((acc, s) => acc + s.amount, 0);
+  }
+
+  function renderPlanProgress() {
+    const monthPlan = getCurrentMonthPlan();
+    planProgressContainer.innerHTML = "";
+
+    PLAN_SHELF_IDS.forEach((shelfId) => {
+      const shelf = SHELVES_CONFIG.find((s) => s.id === shelfId);
+
+      const fact = computeShelfEarningsForMonth(
+        shelfId,
+        currentYear,
+        currentMonth
+      );
+      const plan = monthPlan[shelfId] || 0;
+      const percent = plan > 0 ? (fact / plan) * 100 : 0;
+      const displayPercent = Math.round(percent);
+      const clampedPercent = Math.min(percent, 100);
+      const color = getProgressColor(percent);
+
+      const row = document.createElement("div");
+      row.className = "plan-row";
+
+      const header = document.createElement("div");
+      header.className = "plan-row-header";
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "plan-row-name";
+      nameSpan.textContent = shelf ? shelf.name : shelfId;
+
+      const valueSpan = document.createElement("span");
+      valueSpan.className = "plan-row-value";
+      valueSpan.textContent = `${formatCurrency(
+        fact
+      )} / ${formatCurrency(plan)} · ${displayPercent}%`;
+
+      header.appendChild(nameSpan);
+      header.appendChild(valueSpan);
+
+      const progressOuter = document.createElement("div");
+      progressOuter.className = "plan-progress-bar";
+
+      const progressInner = document.createElement("div");
+      progressInner.className = "plan-progress-fill";
+      progressInner.style.width = `${clampedPercent}%`;
+      progressInner.style.background = color;
+
+      progressOuter.appendChild(progressInner);
+
+      row.appendChild(header);
+      row.appendChild(progressOuter);
+
+      planProgressContainer.appendChild(row);
+    });
+  }
+
+  function computeCoefficient() {
+    const monthPlan = getCurrentMonthPlan();
+
+    let completed = 0;
+    let pensionCompleted = false;
+
+    PLAN_SHELF_IDS.forEach((shelfId) => {
+      const plan = monthPlan[shelfId] || 0;
+      if (plan <= 0) return;
+      const fact = computeShelfEarningsForMonth(
+        shelfId,
+        currentYear,
+        currentMonth
+      );
+      if (fact >= plan) {
+        completed += 1;
+        if (shelfId === "pension") pensionCompleted = true;
+      }
+    });
+
+    let coef = 0;
+    if (completed === 0) {
+      coef = 0;
+    } else if (completed <= 3) {
+      coef = 1.0;
+    } else if (completed >= 5) {
+      coef = 1.3;
+    } else if (completed >= 4) {
+      coef = 1.2;
+    }
+
+    // Штраф за пенсию (кроме 0 полок)
+    if (completed > 0 && !pensionCompleted) {
+      coef = Math.max(0, coef - 0.1);
+    }
+
+    return { coef, completed };
+  }
+
+  // ==============================
+  // Полки и продукты — инфо-блок
+  // ==============================
+
+  function renderShelvesInfo() {
+    shelvesInfoContainer.innerHTML = "";
+
+    SHELVES_CONFIG.forEach((shelf) => {
+      const shelfBlock = document.createElement("div");
+      shelfBlock.className = "shelf-info-block";
+
+      const title = document.createElement("h3");
+      title.className = "shelf-info-title";
+      title.textContent = shelf.name;
+      shelfBlock.appendChild(title);
+
+      const list = document.createElement("div");
+      list.className = "shelf-info-products";
+
+      shelf.products.forEach((product) => {
+        const row = document.createElement("div");
+        row.className = "shelf-info-row";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "shelf-info-name";
+        nameSpan.textContent = product.name;
+
+        const valSpan = document.createElement("span");
+        valSpan.className = "shelf-info-value";
+
+        const value = getProductValue(shelf.id, product.id);
+
+        if (product.type === "fixed") {
+          valSpan.textContent = formatCurrency(value);
+        } else {
+          valSpan.textContent = `${value}% от суммы`;
+        }
+
+        row.appendChild(nameSpan);
+        row.appendChild(valSpan);
+        list.appendChild(row);
+      });
+
+      shelfBlock.appendChild(list);
+      shelvesInfoContainer.appendChild(shelfBlock);
+    });
+  }
+
+  // ==============================
+  // Календарь
+  // ==============================
+
+  function getSalesForDate(dateStr) {
+    return state.sales.filter((s) => s.date === dateStr);
+  }
+
+  function getDayTotalForDate(dateStr) {
+    return getSalesForDate(dateStr).reduce((sum, s) => sum + s.amount, 0);
+  }
+
+  function isCustomWeekend(dateStr) {
+    return !!state.weekends[dateStr];
+  }
+
+  function buildCalendar() {
+    calendarGrid.innerHTML = "";
+
+    const firstDay = new Date(currentYear, currentMonth, 1);
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+    const jsWeekday = firstDay.getDay(); // 0 — вс, 1 — пн ...
+    const offset = (jsWeekday + 6) % 7; // 0 — пн, 6 — вс
+
+    // Пустые клетки до первого числа
+    for (let i = 0; i < offset; i++) {
+      const cell = document.createElement("div");
+      cell.className = "calendar-cell calendar-cell-empty";
+      calendarGrid.appendChild(cell);
+    }
+
+    const monthKey = getMonthKey(currentYear, currentMonth);
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${monthKey}-${String(day).padStart(2, "0")}`;
+      const total = getDayTotalForDate(dateStr);
+      const jsDate = new Date(currentYear, currentMonth, day);
+      const jsDay = jsDate.getDay();
+      const isWeekend = jsDay === 0 || jsDay === 6;
+      const isMarkedWeekend = isCustomWeekend(dateStr);
+
+      const cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "calendar-cell calendar-day";
+      cell.dataset.date = dateStr;
+
+      if (isMarkedWeekend) {
+        cell.classList.add("calendar-day-off");
+      }
+
+      const numDiv = document.createElement("div");
+      numDiv.className = "calendar-day-number";
+      numDiv.textContent = day;
+
+      const totalDiv = document.createElement("div");
+      totalDiv.className = "calendar-day-total";
+      totalDiv.textContent = total > 0 ? formatCurrency(total) : "";
+
+      cell.appendChild(numDiv);
+      cell.appendChild(totalDiv);
+
+      calendarGrid.appendChild(cell);
+    }
+
+    calendarMonthLabel.textContent = `${MONTH_NAMES[currentMonth]} ${currentYear}`;
+  }
+
+  function openDayModal(dateStr) {
+    currentDayDate = dateStr;
+    dayModalTitle.textContent = formatDateRu(dateStr);
+    dayWeekendToggle.checked = !!state.weekends[dateStr];
+    saleEditIdInput.value = "";
+    saleShelfSelect.value = "";
+    saleProductSelect.innerHTML = "";
+    saleInsuranceSumInput.value = "";
+    saleCommentInput.value = "";
+    updateSaleFormForShelf(); // скрыть/показать поле суммы страховки
+    renderDaySalesList();
+    updateDayTotal();
+    openModal("day-modal");
+  }
+
+  function updateDayTotal() {
+    if (!currentDayDate) return;
+    const total = getDayTotalForDate(currentDayDate);
+    dayTotalAmountEl.textContent = formatCurrency(total);
+  }
+
+  function renderDaySalesList() {
+    if (!currentDayDate) return;
+    daySalesList.innerHTML = "";
+
+    const sales = getSalesForDate(currentDayDate);
+
+    if (sales.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "empty-placeholder";
+      empty.textContent = "За этот день продаж нет.";
+      daySalesList.appendChild(empty);
+      return;
+    }
+
+    // сортировка по createdAt убыванию
+    sales
+      .slice()
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+      .forEach((sale) => {
+        const shelf = SHELVES_CONFIG.find((s) => s.id === sale.shelfId);
+        const product = shelf
+          ? shelf.products.find((p) => p.id === sale.productId)
+          : null;
+
+        const row = document.createElement("div");
+        row.className = "day-sale-row";
+        row.dataset.saleId = sale.id;
+
+        const main = document.createElement("div");
+        main.className = "day-sale-main";
+
+        const title = document.createElement("div");
+        title.className = "day-sale-title";
+        title.textContent = `${shelf ? shelf.name : sale.shelfId} — ${
+          product ? product.name : ""
+        }`;
+
+        const amount = document.createElement("div");
+        amount.className = "day-sale-amount";
+        amount.textContent = `+${formatCurrency(sale.amount)}`;
+
+        main.appendChild(title);
+        main.appendChild(amount);
+
+        const meta = document.createElement("div");
+        meta.className = "day-sale-meta";
+        if (sale.comment) {
+          meta.textContent = sale.comment;
+        } else if (
+          sale.insuranceSum &&
+          (sale.insuranceType || sale.productId.startsWith("box_"))
+        ) {
+          meta.textContent = `Сумма страховки: ${formatCurrency(
+            sale.insuranceSum
+          )}`;
+        } else {
+          meta.textContent = "";
+        }
+
+        const actions = document.createElement("div");
+        actions.className = "day-sale-actions";
+
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "icon-btn small";
+        editBtn.dataset.action = "edit-sale";
+        editBtn.textContent = "✎";
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "icon-btn small danger";
+        delBtn.dataset.action = "delete-sale";
+        delBtn.textContent = "🗑";
+
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+
+        row.appendChild(main);
+        row.appendChild(meta);
+        row.appendChild(actions);
+
+        daySalesList.appendChild(row);
+      });
+  }
+
+  function updateSaleFormForShelf() {
+    const shelfId = saleShelfSelect.value;
+    const shelf = SHELVES_CONFIG.find((s) => s.id === shelfId);
+
+    if (!shelf) {
+      saleProductWrapper.classList.add("hidden");
+      saleInsuranceSumWrapper.classList.add("hidden");
+      saleProductSelect.innerHTML = "";
+      return;
+    }
+
+    // Заполняем продукты
+    saleProductSelect.innerHTML = "";
+    shelf.products.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.name;
+      saleProductSelect.appendChild(opt);
+    });
+
+    saleProductWrapper.classList.remove("hidden");
+
+    // Для коробочного страхования — показываем поле "Сумма страховки"
+    if (shelfId === "box_insurance") {
+      saleInsuranceSumWrapper.classList.remove("hidden");
+    } else {
+      saleInsuranceSumWrapper.classList.add("hidden");
+      saleInsuranceSumInput.value = "";
+    }
+  }
+
+  function addOrUpdateSaleFromForm() {
+    if (!currentDayDate) return;
+
+    const shelfId = saleShelfSelect.value;
+    const productId = saleProductSelect.value;
+
+    if (!shelfId || !productId) {
+      showToast("Выберите полку и продукт", "error");
+      return;
+    }
+
+    const shelf = SHELVES_CONFIG.find((s) => s.id === shelfId);
+    const product = shelf
+      ? shelf.products.find((p) => p.id === productId)
+      : null;
+    if (!product) {
+      showToast("Некорректный продукт", "error");
+      return;
+    }
+
+    let amount = 0;
+    let insuranceSum = null;
+
+    if (product.type === "fixed") {
+      const price = getProductValue(shelfId, productId);
+      amount = clampNumber(price);
+    } else if (product.type === "percent") {
+      const sum = parseNumberInput(saleInsuranceSumInput.value);
+      if (sum <= 0) {
+        showToast("Введите сумму страховки", "error");
+        return;
+      }
+      insuranceSum = sum;
+      const percent = getProductValue(shelfId, productId);
+      amount = clampNumber((sum * percent) / 100);
+    }
+
+    const comment = saleCommentInput.value.trim();
+    const editId = saleEditIdInput.value || null;
+    const nowIso = new Date().toISOString();
+
+    if (editId) {
+      const target = state.sales.find((s) => s.id === editId);
+      if (!target) {
+        showToast("Продажа не найдена", "error");
+      } else {
+        target.shelfId = shelfId;
+        target.productId = productId;
+        target.amount = amount;
+        target.comment = comment;
+        target.insuranceSum = insuranceSum;
+        target.insuranceType =
+          product.type === "percent" ? productId : null;
+        target.updatedAt = nowIso;
+      }
+    } else {
+      const sale = {
+        id: genId(),
+        date: currentDayDate,
+        shelfId,
+        productId,
+        amount,
+        comment,
+        insuranceSum,
+        insuranceType: product.type === "percent" ? productId : null,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      state.sales.push(sale);
+    }
+
+    // Сброс формы
+    saleEditIdInput.value = "";
+    saleCommentInput.value = "";
+    if (shelfId === "box_insurance") {
+      saleInsuranceSumInput.value = "";
+    }
+
+    saveState();
+    renderDaySalesList();
+    updateDayTotal();
+    buildCalendar();
+    renderPlanProgress();
+    recalcSummary();
+    renderDealsList();
+    renderSalesChart();
+    showToast("Продажа сохранена", "success");
+  }
+
+  function fillSaleFormForEdit(saleId) {
+    const sale = state.sales.find((s) => s.id === saleId);
+    if (!sale) return;
+    saleEditIdInput.value = sale.id;
+
+    saleShelfSelect.value = sale.shelfId;
+    updateSaleFormForShelf();
+    saleProductSelect.value = sale.productId || "";
+    saleCommentInput.value = sale.comment || "";
+    if (sale.insuranceSum) {
+      saleInsuranceSumInput.value = sale.insuranceSum;
+    } else {
+      saleInsuranceSumInput.value = "";
     }
   }
 
   function deleteSaleById(saleId) {
-    let changed = false;
-    Object.values(state.days).forEach((day) => {
-      const before = day.sales.length;
-      day.sales = day.sales.filter((s) => s.id !== saleId);
-      if (day.sales.length !== before) changed = true;
-    });
-    if (changed) {
-      saveState();
-      recalcAndRenderAll();
-    }
-  }
-
-  function getAllSalesForCurrentMonth() {
-    const res = [];
-    const monthKey = getCurrentMonthKey();
-    Object.entries(state.days).forEach(([dateIso, day]) => {
-      if (!dateIso.startsWith(monthKey + "-")) return;
-      day.sales.forEach((sale) => {
-        res.push({ ...sale, isWeekend: day.isWeekend });
-      });
-    });
-    // Сортировка по дате и времени создания (по убыванию)
-    res.sort((a, b) => {
-      if (a.date === b.date) {
-        return (b.createdAt || "").localeCompare(a.createdAt || "");
-      }
-      return b.date.localeCompare(a.date);
-    });
-    return res;
-  }
-
-  // ---------------------------------------------------------------------------
-  // ДОХОД ПО ПОЛКАМ / КОЭФФИЦИЕНТЫ / ПРЕМИЯ
-  // ---------------------------------------------------------------------------
-
-  function calculateShelfEarnings() {
-    const shelfTotals = {
-      consumer: 0,
-      cards: 0,
-      dk: 0,
-      savings: 0,
-      pension: 0,
-      box: 0, // отдельно, для информации
-    };
-
-    const monthKey = getCurrentMonthKey();
-    Object.entries(state.days).forEach(([dateIso, day]) => {
-      if (!dateIso.startsWith(monthKey + "-")) return;
-      day.sales.forEach((sale) => {
-        if (!shelfTotals.hasOwnProperty(sale.shelf)) {
-          shelfTotals[sale.shelf] = 0;
-        }
-        shelfTotals[sale.shelf] += sale.reward || 0;
-      });
-    });
-
-    return shelfTotals;
-  }
-
-  function calculateCoefficient(shelfTotals) {
-    // Считаем полки, достигшие 100% плана
-    const plan = state.plan;
-    const fullShelves = [];
-
-    ["consumer", "cards", "dk", "savings", "pension"].forEach((shelf) => {
-      const planVal = plan[shelf] || 0;
-      if (planVal <= 0) return;
-      const earned = shelfTotals[shelf] || 0;
-      const progress = (earned / planVal) * 100;
-      if (progress >= 100) fullShelves.push(shelf);
-    });
-
-    let coef = 0;
-    const fullCount = fullShelves.length;
-
-    if (fullCount === 0) {
-      coef = 0;
-    } else if (fullCount <= 3) {
-      coef = 1.0;
-    } else if (fullCount >= 5) {
-      coef = 1.3;
-    } else {
-      // 4 полки
-      coef = 1.2;
-    }
-
-    // Штраф за невыполненный "Перевод пенсии"
-    if (fullCount > 0) {
-      const pensionPlan = plan.pension || 0;
-      let pensionFull = false;
-      if (pensionPlan > 0) {
-        const earnedPension = shelfTotals.pension || 0;
-        const prog = (earnedPension / pensionPlan) * 100;
-        pensionFull = prog >= 100;
-      }
-      if (!pensionFull) {
-        coef -= 0.1;
-      }
-    }
-
-    if (coef < 0) coef = 0;
-    return { coef, fullShelves };
-  }
-
-  function countWorkingDaysCurrentMonth() {
-    const monthKey = getCurrentMonthKey();
-    const [yearStr, monthStr] = monthKey.split("-");
-    const year = parseInt(yearStr, 10);
-    const month = parseInt(monthStr, 10); // 1..12
-
-    const daysInMonth = new Date(year, month, 0).getDate();
-    let count = 0;
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      const iso = `${yearStr}-${monthStr}-${String(d).padStart(2, "0")}`;
-      const dayState = state.days[iso];
-      const isWeekend = dayState?.isWeekend || false;
-      if (!isWeekend) count++;
-    }
-    return count;
-  }
-
-  function calculatePremium() {
-    const shelfTotals = calculateShelfEarnings();
-    const { coef } = calculateCoefficient(shelfTotals);
-
-    const totalEarnings =
-      (shelfTotals.consumer || 0) +
-      (shelfTotals.cards || 0) +
-      (shelfTotals.dk || 0) +
-      (shelfTotals.savings || 0) +
-      (shelfTotals.pension || 0) +
-      (shelfTotals.box || 0); // коробочное тоже платится
-
-    const earningsWithCoef = totalEarnings * coef;
-
-    let serviceBonus = 0;
-    if (state.serviceMode) {
-      const workingDays = countWorkingDaysCurrentMonth();
-      serviceBonus = workingDays * 500;
-    }
-
-    const grossPremium = earningsWithCoef + serviceBonus;
-    const netPremium = grossPremium * 0.87; // -13%
-
-    return {
-      shelfTotals,
-      coef,
-      totalEarnings,
-      earningsWithCoef,
-      serviceBonus,
-      grossPremium,
-      netPremium,
-    };
-  }
-
-  // ---------------------------------------------------------------------------
-  // ВКЛАДКА "ПОДСЧЕТ" — ОТРИСОВКА
-  // ---------------------------------------------------------------------------
-
-  function renderCalcView() {
-    const baseInput = document.getElementById("salary-base-input");
-    const toggleService = document.getElementById("service-toggle");
-
-    if (baseInput) {
-      baseInput.value = state.salaryBase ?? 0;
-      baseInput.addEventListener("change", () => {
-        let v = parseFloat(baseInput.value.replace(",", "."));
-        if (!isFinite(v) || v < 0) v = 0;
-        state.salaryBase = v;
-        saveState();
-        recalcAndRenderAll();
-      });
-    }
-
-    if (toggleService) {
-      toggleService.checked = !!state.serviceMode;
-      toggleService.addEventListener("change", () => {
-        state.serviceMode = toggleService.checked;
-        saveState();
-        recalcAndRenderAll();
-      });
-    }
-
-    const {
-      shelfTotals,
-      coef,
-      totalEarnings,
-      earningsWithCoef,
-      serviceBonus,
-      grossPremium,
-      netPremium,
-    } = calculatePremium();
-
-    const elTotalRaw = document.getElementById("total-raw-earnings");
-    const elTotalWithCoef = document.getElementById("total-earnings-with-coef");
-    const elCoef = document.getElementById("current-coef");
-    const elPremiumGross = document.getElementById("premium-gross");
-    const elPremiumNet = document.getElementById("premium-net");
-
-    if (elTotalRaw) elTotalRaw.textContent = formatMoney(totalEarnings);
-    if (elTotalWithCoef) elTotalWithCoef.textContent = formatMoney(earningsWithCoef + serviceBonus);
-    if (elCoef) elCoef.textContent = coef.toFixed(2);
-
-    if (elPremiumGross) {
-      elPremiumGross.textContent = formatMoney(grossPremium);
-    }
-    if (elPremiumNet) {
-      elPremiumNet.textContent = formatMoney(netPremium);
-    }
-
-    // Прогресс по полкам
-    Object.entries(SHELVES_META).forEach(([shelfKey]) => {
-      const earnedEl = document.querySelector(
-        `[data-shelf-earned="${shelfKey}"]`
-      );
-      const planEl = document.querySelector(`[data-shelf-plan="${shelfKey}"]`);
-      const progressEl = document.querySelector(
-        `[data-shelf-progress="${shelfKey}"]`
-      );
-
-      const planVal = state.plan[shelfKey] || 0;
-      const earnedVal = shelfTotals[shelfKey] || 0;
-      const progress = planVal > 0 ? (earnedVal / planVal) * 100 : 0;
-
-      if (earnedEl) earnedEl.textContent = formatMoney(earnedVal);
-      if (planEl) planEl.textContent = planVal > 0 ? formatMoney(planVal) : "0 ₽";
-
-      if (progressEl) {
-        const capped = Math.max(0, progress);
-        progressEl.textContent = formatPercent(capped);
-        // Можно использовать data-атрибут для CSS (градиент по проценту)
-        progressEl.dataset.progress = String(capped);
-      }
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // КАЛЕНДАРЬ
-  // ---------------------------------------------------------------------------
-
-  function initCalendar() {
-    const grid = document.getElementById("calendar-grid");
-    if (!grid) return;
-
-    grid.innerHTML = "";
-
-    const monthKey = getCurrentMonthKey();
-    const [yearStr, monthStr] = monthKey.split("-");
-    const year = parseInt(yearStr, 10);
-    const month = parseInt(monthStr, 10); // 1..12
-    const daysInMonth = new Date(year, month, 0).getDate();
-
-    const firstDay = new Date(year, month - 1, 1);
-    const firstWeekday = (firstDay.getDay() + 6) % 7; // 0 = Monday
-
-    // Заполняем пустые слоты до 1 числа
-    for (let i = 0; i < firstWeekday; i++) {
-      const emptyCell = createElement("div", { className: "calendar-cell empty" });
-      grid.appendChild(emptyCell);
-    }
-
-    // Дни месяца
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateIso = `${yearStr}-${monthStr}-${String(d).padStart(2, "0")}`;
-      const dayState = state.days[dateIso] || { isWeekend: false, sales: [] };
-      const isWeekend = !!dayState.isWeekend;
-
-      const cell = createElement("button", {
-        className: "calendar-cell day-cell",
-        attrs: { "data-date": dateIso, type: "button" },
-      });
-
-      if (isWeekend) {
-        cell.classList.add("day-weekend");
-      }
-
-      const dayNumber = createElement("div", {
-        className: "day-number",
-        text: String(d),
-      });
-
-      const total = (dayState.sales || []).reduce(
-        (sum, s) => sum + (s.reward || 0),
-        0
-      );
-
-      const totalEl = createElement("div", {
-        className: "day-total",
-        text: total > 0 ? formatMoney(total) : "",
-      });
-
-      cell.appendChild(dayNumber);
-      cell.appendChild(totalEl);
-
-      cell.addEventListener("click", () => {
-        openDayModal(dateIso);
-      });
-
-      grid.appendChild(cell);
-    }
-
-    renderChart();
-  }
-
-  function renderChart() {
-    const canvas = document.getElementById("sales-chart");
-    if (!canvas || !canvas.getContext) return;
-
-    const ctx = canvas.getContext("2d");
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    const width = rect.width || 600;
-    const height = rect.height || 260;
-
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
-
-    ctx.clearRect(0, 0, width, height);
-
-    const monthKey = getCurrentMonthKey();
-    const [yearStr, monthStr] = monthKey.split("-");
-    const year = parseInt(yearStr, 10);
-    const month = parseInt(monthStr, 10); // 1..12
-    const daysInMonth = new Date(year, month, 0).getDate();
-
-    const points = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      const iso = `${yearStr}-${monthStr}-${String(d).padStart(2, "0")}`;
-      const dayState = state.days[iso] || { isWeekend: false, sales: [] };
-      if (dayState.isWeekend) continue;
-
-      const total = (dayState.sales || []).reduce(
-        (sum, s) => sum + (s.reward || 0),
-        0
-      );
-      points.push({ dateIso: iso, value: total });
-    }
-
-    if (!points.length) {
-      // Ничего не рисуем, можно написать "Нет данных"
-      ctx.font = "14px system-ui";
-      ctx.textAlign = "center";
-      ctx.fillText("Нет данных", width / 2, height / 2);
-      return;
-    }
-
-    const paddingLeft = 40;
-    const paddingRight = 10;
-    const paddingTop = 10;
-    const paddingBottom = 30;
-
-    const chartWidth = width - paddingLeft - paddingRight;
-    const chartHeight = height - paddingTop - paddingBottom;
-
-    const maxVal = Math.max(...points.map((p) => p.value), 1);
-
-    // Ось Y (просто линия)
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(paddingLeft, paddingTop);
-    ctx.lineTo(paddingLeft, paddingTop + chartHeight);
-    ctx.stroke();
-
-    // Ось X
-    ctx.beginPath();
-    ctx.moveTo(paddingLeft, paddingTop + chartHeight);
-    ctx.lineTo(width - paddingRight, paddingTop + chartHeight);
-    ctx.stroke();
-
-    // Подготовим точки
-    const stepX = points.length > 1 ? chartWidth / (points.length - 1) : 0;
-
-    const xyPoints = points.map((p, idx) => {
-      const x = paddingLeft + stepX * idx;
-      const y =
-        paddingTop + chartHeight - (p.value / maxVal) * chartHeight;
-      return { ...p, x, y };
-    });
-
-    // Линия
-    ctx.beginPath();
-    xyPoints.forEach((pt, idx) => {
-      if (idx === 0) ctx.moveTo(pt.x, pt.y);
-      else ctx.lineTo(pt.x, pt.y);
-    });
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgba(0, 150, 255, 0.9)";
-    ctx.stroke();
-
-    // Плавное заполнение под линией
-    const gradient = ctx.createLinearGradient(0, paddingTop, 0, height - paddingBottom);
-    gradient.addColorStop(0, "rgba(0,150,255,0.35)");
-    gradient.addColorStop(1, "rgba(0,150,255,0)");
-
-    ctx.beginPath();
-    xyPoints.forEach((pt, idx) => {
-      if (idx === 0) ctx.moveTo(pt.x, pt.y);
-      else ctx.lineTo(pt.x, pt.y);
-    });
-    ctx.lineTo(
-      xyPoints[xyPoints.length - 1].x,
-      paddingTop + chartHeight
-    );
-    ctx.lineTo(xyPoints[0].x, paddingTop + chartHeight);
-    ctx.closePath();
-    ctx.fillStyle = gradient;
-    ctx.fill();
-
-    // Точки
-    ctx.fillStyle = "#ffffff";
-    xyPoints.forEach((pt) => {
-      ctx.beginPath();
-      ctx.arc(pt.x, pt.y, 3, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
-    // Подписи по X (даты)
-    ctx.font = "11px system-ui";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,0.8)";
-    xyPoints.forEach((pt, idx) => {
-      // показываем не каждую, чтобы не было каши
-      if (points.length > 15 && idx % 2 !== 0) return;
-      const d = parseISOToDate(pt.dateIso).getDate();
-      ctx.fillText(String(d), pt.x, paddingTop + chartHeight + 14);
-    });
-
-    // Подпись максимума по Y
-    ctx.textAlign = "right";
-    ctx.fillText(
-      formatMoney(maxVal),
-      paddingLeft - 4,
-      paddingTop + 10
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // МОДАЛКА ДНЯ (СПИСОК ПРОДАЖ + ДОБАВИТЬ ПРОДАЖУ + ВЫХОДНОЙ)
-  // ---------------------------------------------------------------------------
-
-  function openDayModal(dateIso) {
-    const dayState = getDayState(dateIso);
-    const dateObj = parseISOToDate(dateIso);
-
-    const content = createElement("div", { className: "modal-card modal-day-card" });
-
-    const title = createElement("h3", {
-      className: "modal-title",
-      text: `Продажи за ${dateObj.toLocaleDateString("ru-RU")}`,
-    });
-
-    const total = (dayState.sales || []).reduce(
-      (sum, s) => sum + (s.reward || 0),
-      0
-    );
-
-    const totalEl = createElement("div", {
-      className: "day-total-header",
-      text: `Итого за день: ${formatMoney(total)}`,
-    });
-
-    const weekendRow = createElement("label", { className: "form-row weekend-row" });
-    const weekendCheckbox = createElement("input", {
-      className: "weekend-checkbox",
-      attrs: { type: "checkbox" },
-    });
-    weekendCheckbox.checked = !!dayState.isWeekend;
-    const weekendLabelText = createElement("span", {
-      text: "Выходной день",
-    });
-
-    weekendRow.appendChild(weekendCheckbox);
-    weekendRow.appendChild(weekendLabelText);
-
-    weekendCheckbox.addEventListener("change", () => {
-      setDayWeekend(dateIso, weekendCheckbox.checked);
-    });
-
-    const btnAddSale = createElement("button", {
-      className: "btn btn-primary",
-      text: "Добавить продажу",
-    });
-
-    btnAddSale.addEventListener("click", () => {
-      openSaleEditorModal({ dateIso });
-    });
-
-    const salesList = createElement("div", { className: "sales-list" });
-    if (!dayState.sales.length) {
-      salesList.appendChild(
-        createElement("div", {
-          className: "empty-placeholder",
-          text: "Продаж за день пока нет.",
-        })
-      );
-    } else {
-      dayState.sales.forEach((sale) => {
-        const item = renderSaleListItem(sale);
-        salesList.appendChild(item);
-      });
-    }
-
-    const actions = createElement("div", { className: "modal-actions" });
-    const btnClose = createElement("button", {
-      className: "btn btn-secondary",
-      text: "Закрыть",
-    });
-    actions.appendChild(btnClose);
-
-    content.appendChild(title);
-    content.appendChild(totalEl);
-    content.appendChild(weekendRow);
-    content.appendChild(btnAddSale);
-    content.appendChild(salesList);
-    content.appendChild(actions);
-
-    const { close } = openModal(content, {
-      maxWidth: "720px",
-      disableBackdropClose: false,
-    });
-
-    btnClose.addEventListener("click", () => {
-      close();
-    });
-  }
-
-  function renderSaleListItem(sale) {
-    const item = createElement("div", {
-      className: "sale-item",
-      attrs: { "data-sale-id": sale.id },
-    });
-
-    const shelfName = getShelfLabel(sale.shelf);
-    const title = createElement("div", {
-      className: "sale-item-title",
-      text: `${shelfName} — ${formatMoney(sale.reward)} (${sale.productLabel || ""})`,
-    });
-
-    const comment = createElement("div", {
-      className: "sale-item-comment",
-      text: sale.comment || "",
-    });
-
-    const actions = createElement("div", { className: "sale-item-actions" });
-    const btnEdit = createElement("button", {
-      className: "btn btn-ghost",
-      text: "Изменить",
-    });
-    const btnDelete = createElement("button", {
-      className: "btn btn-ghost btn-danger",
-      text: "Удалить",
-    });
-
-    btnEdit.addEventListener("click", () => {
-      openSaleEditorModal({ existingSaleId: sale.id });
-    });
-
-    btnDelete.addEventListener("click", () => {
-      openConfirmDialog("Вы точно хотите удалить продажу?", () => {
-        deleteSaleById(sale.id);
-      });
-    });
-
-    actions.appendChild(btnEdit);
-    actions.appendChild(btnDelete);
-
-    item.appendChild(title);
-    item.appendChild(comment);
-    item.appendChild(actions);
-
-    return item;
-  }
-
-  function getShelfLabel(shelfKey) {
-    switch (shelfKey) {
-      case "consumer":
-        return "Потребительский кредит";
-      case "cards":
-        return "Кредитные карты";
-      case "dk":
-        return "Активация ДК";
-      case "savings":
-        return "Накопительная полка";
-      case "box":
-        return "Коробочное страхование";
-      case "pension":
-        return "Перевод пенсии";
-      default:
-        return "Продукт";
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // ФОРМА ДОБАВЛЕНИЯ / РЕДАКТИРОВАНИЯ ПРОДАЖИ
-  // ---------------------------------------------------------------------------
-
-  function openSaleEditorModal({ dateIso, existingSaleId }) {
-    const isEdit = !!existingSaleId;
-    let sale = null;
-
-    if (isEdit) {
-      Object.values(state.days).forEach((day) => {
-        day.sales.forEach((s) => {
-          if (s.id === existingSaleId) sale = s;
-        });
-      });
-    }
-
-    const targetDateIso = dateIso || (sale ? sale.date : todayISO());
-    const dateObj = parseISOToDate(targetDateIso);
-
-    const content = createElement("div", { className: "modal-card" });
-    const title = createElement("h3", {
-      className: "modal-title",
-      text: isEdit
-        ? `Изменить продажу (${dateObj.toLocaleDateString("ru-RU")})`
-        : `Добавить продажу (${dateObj.toLocaleDateString("ru-RU")})`,
-    });
-
-    const form = createElement("form", { className: "modal-form" });
-
-    // Полка
-    const shelfRow = createElement("div", { className: "form-row" });
-    const shelfLabel = createElement("label", {
-      className: "form-label",
-      text: "Полка",
-    });
-    const shelfSelect = createElement("select", {
-      className: "form-input",
-      attrs: { required: "required" },
-    });
-
-    [
-      { value: "consumer", label: "Потребительский кредит" },
-      { value: "cards", label: "Кредитные карты" },
-      { value: "dk", label: "Активация ДК" },
-      { value: "savings", label: "Накопительная полка" },
-      { value: "box", label: "Коробочное страхование" },
-      { value: "pension", label: "Перевод пенсии" },
-    ].forEach((opt) => {
-      const o = createElement("option", {
-        text: opt.label,
-        attrs: { value: opt.value },
-      });
-      shelfSelect.appendChild(o);
-    });
-    shelfRow.appendChild(shelfLabel);
-    shelfRow.appendChild(shelfSelect);
-    form.appendChild(shelfRow);
-
-    // Подпродукт
-    const productRow = createElement("div", { className: "form-row" });
-    const productLabel = createElement("label", {
-      className: "form-label",
-      text: "Продукт",
-    });
-    const productSelect = createElement("select", {
-      className: "form-input",
-      attrs: { required: "required" },
-    });
-    productRow.appendChild(productLabel);
-    productRow.appendChild(productSelect);
-    form.appendChild(productRow);
-
-    // Поле суммы для коробочного страхования
-    const amountRow = createElement("div", {
-      className: "form-row",
-      attrs: { "data-field": "amount" },
-    });
-    const amountLabel = createElement("label", {
-      className: "form-label",
-      text: "Сумма (для страхования)",
-    });
-    const amountInput = createElement("input", {
-      className: "form-input",
-      attrs: { type: "number", step: "0.01", min: "0" },
-    });
-    amountRow.style.display = "none";
-    amountRow.appendChild(amountLabel);
-    amountRow.appendChild(amountInput);
-    form.appendChild(amountRow);
-
-    // Комментарий
-    const commentRow = createElement("div", { className: "form-row" });
-    const commentLabel = createElement("label", {
-      className: "form-label",
-      text: "Комментарий",
-    });
-    const commentInput = createElement("textarea", {
-      className: "form-input",
-      attrs: { rows: "2" },
-    });
-    commentRow.appendChild(commentLabel);
-    commentRow.appendChild(commentInput);
-    form.appendChild(commentRow);
-
-    const actions = createElement("div", { className: "modal-actions" });
-    const btnSave = createElement("button", {
-      className: "btn btn-primary",
-      text: isEdit ? "Сохранить изменения" : "Добавить продажу",
-      attrs: { type: "submit" },
-    });
-    const btnCancel = createElement("button", {
-      className: "btn btn-secondary",
-      text: "Отмена",
-      attrs: { type: "button" },
-    });
-
-    actions.appendChild(btnSave);
-    actions.appendChild(btnCancel);
-
-    content.appendChild(title);
-    content.appendChild(form);
-    content.appendChild(actions);
-
-    const { close } = openModal(content, { maxWidth: "520px" });
-
-    function refreshProductOptions() {
-      const shelf = shelfSelect.value;
-      productSelect.innerHTML = "";
-
-      if (shelf === "consumer") {
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Заявка",
-            attrs: { value: "loanApplication" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Выдача",
-            attrs: { value: "loanIssue" },
-          })
-        );
-        amountRow.style.display = "none";
-      } else if (shelf === "cards") {
-        productSelect.appendChild(
-          createElement("option", {
-            text: "С рассмотрением",
-            attrs: { value: "withReview" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Сплит",
-            attrs: { value: "split" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Заявка",
-            attrs: { value: "application" },
-          })
-        );
-        amountRow.style.display = "none";
-      } else if (shelf === "dk") {
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Выдача карты",
-            attrs: { value: "cardIssue" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: 'ТА по "Яркой"',
-            attrs: { value: "taYarkaya" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "ТА по остальным (кроме ЕКП)",
-            attrs: { value: "taOther" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "ТА по ЕКП",
-            attrs: { value: "taEkp" },
-          })
-        );
-        amountRow.style.display = "none";
-      } else if (shelf === "savings") {
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Вклад",
-            attrs: { value: "deposit" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Накопительный счёт",
-            attrs: { value: "savingsAccount" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Выдача Premium Light",
-            attrs: { value: "premiumLightIssue" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Кнопка учёта стикеров Premium Light",
-            attrs: { value: "premiumLightSticker" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "СМС-информирование",
-            attrs: { value: "smsInfo" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Лид ЦПО",
-            attrs: { value: "leadCpo" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Лид ипотека",
-            attrs: { value: "leadMortgage" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: 'Страхование "Карточный сейф"',
-            attrs: { value: "cardSafeIns" },
-          })
-        );
-        amountRow.style.display = "none";
-      } else if (shelf === "box") {
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Стандартное (8% от суммы)",
-            attrs: { value: "general" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Акционное (1% от суммы)",
-            attrs: { value: "promo" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Стандартное (3% от суммы)",
-            attrs: { value: "standard" },
-          })
-        );
-        amountRow.style.display = "";
-      } else if (shelf === "pension") {
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Страховая пенсия",
-            attrs: { value: "insurance" },
-          })
-        );
-        productSelect.appendChild(
-          createElement("option", {
-            text: "Военная пенсия",
-            attrs: { value: "military" },
-          })
-        );
-        amountRow.style.display = "none";
-      }
-    }
-
-    shelfSelect.addEventListener("change", refreshProductOptions);
-
-    // Префилл при редактировании
-    if (sale) {
-      shelfSelect.value = sale.shelf;
-      refreshProductOptions();
-      if (sale.productKey) {
-        productSelect.value = sale.productKey;
-      }
-      if (sale.shelf === "box") {
-        amountRow.style.display = "";
-        amountInput.value = sale.amount ?? 0;
-      } else {
-        amountRow.style.display = "none";
-      }
-      commentInput.value = sale.comment || "";
-    } else {
-      shelfSelect.value = "consumer";
-      refreshProductOptions();
-    }
-
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-
-      const shelf = shelfSelect.value;
-      const productKey = productSelect.value;
-      const comment = commentInput.value.trim();
-
-      let amount = 0;
-      if (shelf === "box") {
-        amount = parseFloat(amountInput.value.replace(",", "."));
-        if (!isFinite(amount) || amount <= 0) {
-          alert("Укажите корректную сумму для страхования");
-          return;
-        }
-      }
-
-      // Расчитываем reward
-      let reward = 0;
-      let productLabel = productSelect.options[productSelect.selectedIndex]?.text || "";
-
-      if (shelf === "box") {
-        const percent = state.prices.box[productKey] || 0;
-        reward = amount * (percent / 100);
-      } else {
-        const shelfPrices = state.prices[shelf] || {};
-        reward = shelfPrices[productKey] || 0;
-      }
-
-      if (!isEdit) {
-        const newSale = {
-          id: generateId("sale"),
-          date: targetDateIso,
-          shelf,
-          productKey,
-          productLabel,
-          amount: shelf === "box" ? amount : 1,
-          reward,
-          comment,
-          createdAt: new Date().toISOString(),
-        };
-        addSale(newSale);
-      } else if (sale) {
-        updateSale(sale.id, (s) => {
-          s.shelf = shelf;
-          s.productKey = productKey;
-          s.productLabel = productLabel;
-          s.amount = shelf === "box" ? amount : 1;
-          s.reward = reward;
-          s.comment = comment;
-        });
-      }
-
-      close();
-    });
-
-    btnCancel.addEventListener("click", () => {
-      close();
-    });
-  }
-
-  // ---------------------------------------------------------------------------
-  // ВКЛАДКА "МОИ СДЕЛКИ"
-  // ---------------------------------------------------------------------------
-
-  function initDealsView() {
-    const filterSelect = document.getElementById("deals-filter");
-    if (filterSelect && !filterSelect.dataset._initialized) {
-      filterSelect.dataset._initialized = "1";
-      filterSelect.innerHTML = "";
-
-      const optAll = createElement("option", {
-        text: "Все полки",
-        attrs: { value: "" },
-      });
-      filterSelect.appendChild(optAll);
-
-      [
-        { value: "consumer", label: "Потребительский кредит" },
-        { value: "cards", label: "Кредитные карты" },
-        { value: "dk", label: "Активация ДК" },
-        { value: "savings", label: "Накопительная полка" },
-        { value: "box", label: "Коробочное страхование" },
-        { value: "pension", label: "Перевод пенсии" },
-      ].forEach((opt) => {
-        const o = createElement("option", {
-          text: opt.label,
-          attrs: { value: opt.value },
-        });
-        filterSelect.appendChild(o);
-      });
-
-      filterSelect.addEventListener("change", renderDealsList);
-    }
-
+    const idx = state.sales.findIndex((s) => s.id === saleId);
+    if (idx === -1) return;
+    state.sales.splice(idx, 1);
+    saveState();
+    buildCalendar();
+    renderDaySalesList();
+    updateDayTotal();
+    renderPlanProgress();
+    recalcSummary();
     renderDealsList();
+    renderSalesChart();
+    showToast("Продажа удалена", "info");
+  }
+
+  function attachCalendarHandlers() {
+    if (prevMonthBtn) {
+      prevMonthBtn.addEventListener("click", () => {
+        currentMonth -= 1;
+        if (currentMonth < 0) {
+          currentMonth = 11;
+          currentYear -= 1;
+        }
+        state.currentYear = currentYear;
+        state.currentMonth = currentMonth;
+        ensureMonthPlan(currentYear, currentMonth);
+        saveState();
+        rerenderAll();
+      });
+    }
+
+    if (nextMonthBtn) {
+      nextMonthBtn.addEventListener("click", () => {
+        currentMonth += 1;
+        if (currentMonth > 11) {
+          currentMonth = 0;
+          currentYear += 1;
+        }
+        state.currentYear = currentYear;
+        state.currentMonth = currentMonth;
+        ensureMonthPlan(currentYear, currentMonth);
+        saveState();
+        rerenderAll();
+      });
+    }
+
+    if (todayMonthBtn) {
+      todayMonthBtn.addEventListener("click", () => {
+        const today = new Date();
+        currentYear = today.getFullYear();
+        currentMonth = today.getMonth();
+        state.currentYear = currentYear;
+        state.currentMonth = currentMonth;
+        ensureMonthPlan(currentYear, currentMonth);
+        saveState();
+        rerenderAll();
+      });
+    }
+
+    // Клик по дням календаря
+    if (calendarGrid) {
+      calendarGrid.addEventListener("click", (e) => {
+        const cell = e.target.closest(".calendar-day");
+        if (!cell) return;
+        const dateStr = cell.dataset.date;
+        if (!dateStr) return;
+        openDayModal(dateStr);
+      });
+    }
+
+    if (dayWeekendToggle) {
+      dayWeekendToggle.addEventListener("change", () => {
+        if (!currentDayDate) return;
+        if (dayWeekendToggle.checked) {
+          state.weekends[currentDayDate] = true;
+        } else {
+          delete state.weekends[currentDayDate];
+        }
+        saveState();
+        buildCalendar();
+        renderSalesChart();
+        recalcSummary();
+      });
+    }
+
+    if (daySaleForm) {
+      daySaleForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        addOrUpdateSaleFromForm();
+      });
+    }
+
+    if (saleShelfSelect) {
+      saleShelfSelect.addEventListener("change", () => {
+        updateSaleFormForShelf();
+      });
+    }
+
+    if (daySaleCancelEditBtn) {
+      daySaleCancelEditBtn.addEventListener("click", () => {
+        saleEditIdInput.value = "";
+        saleCommentInput.value = "";
+        saleInsuranceSumInput.value = "";
+        saleShelfSelect.value = "";
+        saleProductSelect.innerHTML = "";
+        saleInsuranceSumWrapper.classList.add("hidden");
+        saleProductWrapper.classList.add("hidden");
+      });
+    }
+
+    // Делегирование для кнопок "изменить/удалить" в окне дня
+    if (daySalesList) {
+      daySalesList.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const row = btn.closest(".day-sale-row");
+        if (!row) return;
+        const saleId = row.dataset.saleId;
+        if (!saleId) return;
+
+        if (action === "edit-sale") {
+          fillSaleFormForEdit(saleId);
+        } else if (action === "delete-sale") {
+          askDeleteSale(saleId);
+        }
+      });
+    }
+  }
+
+  // ==============================
+  // Мои сделки
+  // ==============================
+
+  function buildDealsShelfFilterOptions() {
+    // базовая опция "Все полки" уже есть
+    SHELVES_CONFIG.forEach((shelf) => {
+      const opt = document.createElement("option");
+      opt.value = shelf.id;
+      opt.textContent = shelf.name;
+      dealsShelfFilter.appendChild(opt);
+    });
   }
 
   function renderDealsList() {
-    const container = document.getElementById("deals-list");
-    if (!container) return;
+    if (!dealsList) return;
+    dealsList.innerHTML = "";
 
-    const filterSelect = document.getElementById("deals-filter");
-    const shelfFilter = filterSelect ? filterSelect.value : "";
+    const monthKey = getMonthKey(currentYear, currentMonth);
 
-    const allSales = getAllSalesForCurrentMonth();
-    const filtered = shelfFilter
-      ? allSales.filter((s) => s.shelf === shelfFilter)
-      : allSales;
+    let deals = state.sales.filter((s) => s.date.startsWith(monthKey));
 
-    container.innerHTML = "";
+    const filterShelf = dealsShelfFilter ? dealsShelfFilter.value : "all";
+    if (filterShelf && filterShelf !== "all") {
+      deals = deals.filter((s) => s.shelfId === filterShelf);
+    }
 
-    if (!filtered.length) {
-      container.appendChild(
-        createElement("div", {
-          className: "empty-placeholder",
-          text: "За текущий месяц сделок пока нет.",
-        })
-      );
+    if (deals.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "empty-placeholder";
+      empty.textContent =
+        "В этом месяце ещё нет сделок с выбранным фильтром.";
+      dealsList.appendChild(empty);
       return;
     }
 
-    filtered.forEach((sale) => {
-      const card = createElement("div", { className: "deal-card" });
+    deals
+      .slice()
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""))
+      .forEach((sale) => {
+        const shelf = SHELVES_CONFIG.find((s) => s.id === sale.shelfId);
+        const product = shelf
+          ? shelf.products.find((p) => p.id === sale.productId)
+          : null;
 
-      const header = createElement("div", { className: "deal-card-header" });
-      const date = parseISOToDate(sale.date);
-      const dateLabel = createElement("div", {
-        className: "deal-date",
-        text: date.toLocaleDateString("ru-RU"),
+        const item = document.createElement("div");
+        item.className = "deal-item";
+        item.dataset.saleId = sale.id;
+
+        const top = document.createElement("div");
+        top.className = "deal-item-top";
+
+        const title = document.createElement("div");
+        title.className = "deal-item-title";
+        title.textContent = `${shelf ? shelf.name : sale.shelfId} — ${
+          product ? product.name : ""
+        }`;
+
+        const amount = document.createElement("div");
+        amount.className = "deal-item-amount";
+        amount.textContent = `+${formatCurrency(sale.amount)}`;
+
+        top.appendChild(title);
+        top.appendChild(amount);
+
+        const bottom = document.createElement("div");
+        bottom.className = "deal-item-bottom";
+
+        const dt = new Date(sale.date);
+        const createdAt = sale.createdAt
+          ? new Date(sale.createdAt)
+          : dt;
+
+        const dateSpan = document.createElement("span");
+        dateSpan.className = "deal-item-date";
+        dateSpan.textContent = `${formatDateRu(
+          sale.date
+        )}, ${createdAt.toTimeString().slice(0, 5)}`;
+
+        const commentSpan = document.createElement("span");
+        commentSpan.className = "deal-item-comment";
+        commentSpan.textContent = sale.comment || "";
+
+        bottom.appendChild(dateSpan);
+        bottom.appendChild(commentSpan);
+
+        item.appendChild(top);
+        item.appendChild(bottom);
+
+        // Клик — показать модалку с деталями
+        item.addEventListener("click", () => {
+          openDealDetailsModal(sale.id);
+        });
+
+        dealsList.appendChild(item);
       });
-      const timeLabel = createElement("div", {
-        className: "deal-time",
-        text: sale.createdAt
-          ? new Date(sale.createdAt).toLocaleTimeString("ru-RU", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : "",
-      });
-
-      header.appendChild(dateLabel);
-      header.appendChild(timeLabel);
-
-      const title = createElement("div", {
-        className: "deal-title",
-        text: `${getShelfLabel(sale.shelf)} — ${formatMoney(sale.reward)}`,
-      });
-
-      const comment = createElement("div", {
-        className: "deal-comment",
-        text: sale.comment || "",
-      });
-
-      const footer = createElement("div", { className: "deal-footer" });
-      const btnDetails = createElement("button", {
-        className: "btn btn-ghost",
-        text: "Подробнее",
-      });
-
-      btnDetails.addEventListener("click", () => {
-        openSaleDetailsModal(sale.id);
-      });
-
-      footer.appendChild(btnDetails);
-
-      card.appendChild(header);
-      card.appendChild(title);
-      card.appendChild(comment);
-      card.appendChild(footer);
-
-      container.appendChild(card);
-    });
   }
 
-  function openSaleDetailsModal(saleId) {
-    let sale = null;
-    let dateIso = null;
-    Object.entries(state.days).forEach(([iso, day]) => {
-      day.sales.forEach((s) => {
-        if (s.id === saleId) {
-          sale = s;
-          dateIso = iso;
-        }
-      });
-    });
+  function openDealDetailsModal(saleId) {
+    const sale = state.sales.find((s) => s.id === saleId);
     if (!sale) return;
 
-    const dateObj = parseISOToDate(dateIso || sale.date);
+    dealDetailsBody.innerHTML = "";
 
-    const content = createElement("div", { className: "modal-card" });
-    const title = createElement("h3", {
-      className: "modal-title",
-      text: "Детали продажи",
-    });
+    const shelf = SHELVES_CONFIG.find((s) => s.id === sale.shelfId);
+    const product = shelf
+      ? shelf.products.find((p) => p.id === sale.productId)
+      : null;
 
-    const info = createElement("div", { className: "details-grid" });
+    const dl = document.createElement("dl");
+    dl.className = "details-dl";
 
-    info.appendChild(
-      createDetailRow(
-        "Дата",
-        dateObj.toLocaleDateString("ru-RU")
-      )
+    const addRow = (label, value) => {
+      const dt = document.createElement("dt");
+      dt.textContent = label;
+      const dd = document.createElement("dd");
+      dd.textContent = value;
+      dl.appendChild(dt);
+      dl.appendChild(dd);
+    };
+
+    addRow(
+      "Дата",
+      formatDateRu(sale.date)
     );
-    info.appendChild(
-      createDetailRow(
+    const createdAt = sale.createdAt ? new Date(sale.createdAt) : null;
+    if (createdAt) {
+      addRow(
         "Время",
-        sale.createdAt
-          ? new Date(sale.createdAt).toLocaleTimeString("ru-RU", {
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : "-"
-      )
-    );
-    info.appendChild(
-      createDetailRow("Полка", getShelfLabel(sale.shelf))
-    );
-    info.appendChild(
-      createDetailRow("Продукт", sale.productLabel || sale.productKey || "-")
-    );
-    info.appendChild(
-      createDetailRow("Сумма вознаграждения", formatMoney(sale.reward))
-    );
-    if (sale.shelf === "box") {
-      info.appendChild(
-        createDetailRow("Сумма страховки", formatMoney(sale.amount || 0))
+        createdAt.toTimeString().slice(0, 8)
       );
     }
-    info.appendChild(
-      createDetailRow("Комментарий", sale.comment || "—")
-    );
+    addRow("Полка", shelf ? shelf.name : sale.shelfId);
+    addRow("Продукт", product ? product.name : "");
+    addRow("Сумма", formatCurrency(sale.amount));
+    if (sale.insuranceSum) {
+      addRow("Сумма страховки", formatCurrency(sale.insuranceSum));
+    }
+    addRow("Комментарий", sale.comment || "—");
 
-    const actions = createElement("div", { className: "modal-actions" });
-    const btnEdit = createElement("button", {
-      className: "btn btn-primary",
-      text: "Изменить",
-    });
-    const btnDelete = createElement("button", {
-      className: "btn btn-danger",
-      text: "Удалить",
-    });
-    const btnClose = createElement("button", {
-      className: "btn btn-secondary",
-      text: "Закрыть",
-    });
+    dealDetailsBody.appendChild(dl);
 
-    actions.appendChild(btnEdit);
-    actions.appendChild(btnDelete);
-    actions.appendChild(btnClose);
+    // навешиваем ID
+    dealDetailsModal.dataset.saleId = sale.id;
 
-    content.appendChild(title);
-    content.appendChild(info);
-    content.appendChild(actions);
-
-    const { close } = openModal(content, { maxWidth: "520px" });
-
-    btnClose.addEventListener("click", () => close());
-    btnEdit.addEventListener("click", () => {
-      close();
-      openSaleEditorModal({ existingSaleId: saleId });
-    });
-    btnDelete.addEventListener("click", () => {
-      openConfirmDialog("Вы точно хотите удалить продажу?", () => {
-        deleteSaleById(saleId);
-        close();
-      });
-    });
+    openModal("deal-details-modal");
   }
 
-  function createDetailRow(label, value) {
-    const row = createElement("div", { className: "details-row" });
-    const l = createElement("div", { className: "details-label", text: label });
-    const v = createElement("div", { className: "details-value", text: value });
-    row.appendChild(l);
-    row.appendChild(v);
-    return row;
-  }
-
-  // ---------------------------------------------------------------------------
-  // ВКЛАДКА "ЗВОНКИ"
-  // ---------------------------------------------------------------------------
-
-  function initCallsView() {
-    const btnAdd = document.getElementById("btn-add-call");
-    if (btnAdd && !btnAdd.dataset._initialized) {
-      btnAdd.dataset._initialized = "1";
-      btnAdd.addEventListener("click", () => {
-        openCallEditorModal();
+  function attachDealsHandlers() {
+    if (dealsShelfFilter) {
+      dealsShelfFilter.addEventListener("change", () => {
+        renderDealsList();
       });
     }
 
-    renderCallsList();
+    if (dealDetailsEditBtn) {
+      dealDetailsEditBtn.addEventListener("click", () => {
+        const saleId = dealDetailsModal.dataset.saleId;
+        if (!saleId) return;
+        const sale = state.sales.find((s) => s.id === saleId);
+        if (!sale) return;
+        closeModal("deal-details-modal");
+        // Открываем день и сразу в режим редактирования
+        currentYear = new Date(sale.date).getFullYear();
+        currentMonth = new Date(sale.date).getMonth();
+        state.currentYear = currentYear;
+        state.currentMonth = currentMonth;
+        saveState();
+        buildCalendar();
+        openDayModal(sale.date);
+        fillSaleFormForEdit(saleId);
+      });
+    }
+
+    if (dealDetailsDeleteBtn) {
+      dealDetailsDeleteBtn.addEventListener("click", () => {
+        const saleId = dealDetailsModal.dataset.saleId;
+        if (!saleId) return;
+        closeModal("deal-details-modal");
+        askDeleteSale(saleId);
+      });
+    }
   }
 
-  function renderCallsList() {
-    const container = document.getElementById("calls-list");
-    if (!container) return;
+  // ==============================
+  // График по будним дням
+  // ==============================
 
-    container.innerHTML = "";
+  function renderSalesChart() {
+    if (!salesChartCanvas) return;
+    const ctx = salesChartCanvas.getContext("2d");
+    const width = salesChartCanvas.width;
+    const height = salesChartCanvas.height;
 
-    const calls = [...(state.calls || [])];
-    // сортировка по убыванию даты
-    calls.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+    ctx.clearRect(0, 0, width, height);
 
-    if (!calls.length) {
-      container.appendChild(
-        createElement("div", {
-          className: "empty-placeholder",
-          text: "Звонков пока нет.",
-        })
-      );
+    const monthKey = getMonthKey(currentYear, currentMonth);
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+
+    const points = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateStr = `${monthKey}-${String(day).padStart(2, "0")}`;
+      const dt = new Date(currentYear, currentMonth, day);
+      const jsDay = dt.getDay();
+      const isWeekend = jsDay === 0 || jsDay === 6;
+      if (isWeekend) continue;
+      if (state.weekends[dateStr]) continue;
+
+      const total = getDayTotalForDate(dateStr);
+      points.push({ dateStr, total });
+    }
+
+    if (points.length === 0) {
+      ctx.fillStyle = "#9ca3af";
+      ctx.font = "14px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.fillText("Нет данных для графика", 20, height / 2);
       return;
     }
 
-    calls.forEach((call) => {
-      const card = createElement("div", { className: "call-card" });
+    const maxY = Math.max(...points.map((p) => p.total), 1);
+    const padding = 32;
+    const chartWidth = width - padding * 2;
+    const chartHeight = height - padding * 2;
 
-      const header = createElement("div", { className: "call-card-header" });
-      const nameEl = createElement("div", {
-        className: "call-name",
-        text: call.clientName,
-      });
-      const phoneEl = createElement("div", {
-        className: "call-phone",
-        text: call.phoneFormatted || call.phoneRaw,
-      });
-      header.appendChild(nameEl);
-      header.appendChild(phoneEl);
+    // Оси
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padding, padding);
+    ctx.lineTo(padding, padding + chartHeight);
+    ctx.lineTo(padding + chartWidth, padding + chartHeight);
+    ctx.stroke();
 
-      const resultEl = createElement("div", {
-        className:
-          "call-result call-result-" +
-          (call.result === "positive" ? "pos" : "neg"),
-        text: call.result === "positive" ? "Положительный" : "Отрицательный",
-      });
+    // Горизонтальные линии
+    const gridLines = 4;
+    ctx.strokeStyle = "rgba(255,255,255,0.1)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    for (let i = 1; i <= gridLines; i++) {
+      const y =
+        padding +
+        (chartHeight * i) / gridLines;
+      ctx.beginPath();
+      ctx.moveTo(padding, y);
+      ctx.lineTo(padding + chartWidth, y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
 
-      const dateEl = createElement("div", {
-        className: "call-date",
-        text: call.createdAt
-          ? new Date(call.createdAt).toLocaleString("ru-RU", {
-              day: "2-digit",
-              month: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : "",
-      });
+    // Линия графика
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#38bdf8"; // яркий синий
+    ctx.beginPath();
+    points.forEach((p, idx) => {
+      const x =
+        padding +
+        (chartWidth *
+          (idx / Math.max(points.length - 1, 1)));
+      const y =
+        padding +
+        chartHeight -
+        (chartHeight * p.total) / maxY;
+      if (idx === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
 
-      const footer = createElement("div", { className: "call-footer" });
-      const btnDetails = createElement("button", {
-        className: "btn btn-ghost",
-        text: "Подробнее",
-      });
-
-      btnDetails.addEventListener("click", () => {
-        openCallDetailsModal(call.id);
-      });
-
-      footer.appendChild(btnDetails);
-
-      card.appendChild(header);
-      card.appendChild(resultEl);
-      card.appendChild(dateEl);
-      card.appendChild(footer);
-
-      container.appendChild(card);
+    // Точки
+    ctx.fillStyle = "#ef4444"; // красные точки
+    points.forEach((p, idx) => {
+      const x =
+        padding +
+        (chartWidth *
+          (idx / Math.max(points.length - 1, 1)));
+      const y =
+        padding +
+        chartHeight -
+        (chartHeight * p.total) / maxY;
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
     });
   }
 
-  function openCallEditorModal(existingCallId) {
-    const isEdit = !!existingCallId;
-    let call = null;
-    if (isEdit) {
-      call = (state.calls || []).find((c) => c.id === existingCallId) || null;
+  // ==============================
+  // Звонки
+  // ==============================
+
+  function renderCallsList() {
+    if (!callsList) return;
+    callsList.innerHTML = "";
+
+    if (state.calls.length === 0) {
+      const p = document.createElement("p");
+      p.className = "empty-placeholder";
+      p.textContent = "Звонков ещё нет.";
+      callsList.appendChild(p);
+      return;
     }
 
-    const content = createElement("div", { className: "modal-card" });
-    const title = createElement("h3", {
-      className: "modal-title",
-      text: isEdit ? "Изменить звонок" : "Добавить звонок",
-    });
+    const sorted = state.calls
+      .slice()
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 
-    const form = createElement("form", { className: "modal-form" });
+    sorted.forEach((call) => {
+      const item = document.createElement("div");
+      item.className = "call-item";
 
-    // ФИО
-    const nameRow = createElement("div", { className: "form-row" });
-    const nameLabel = createElement("label", {
-      className: "form-label",
-      text: "ФИО клиента",
-    });
-    const nameInput = createElement("input", {
-      className: "form-input",
-      attrs: { type: "text", required: "required" },
-    });
-    nameRow.appendChild(nameLabel);
-    nameRow.appendChild(nameInput);
-    form.appendChild(nameRow);
+      const top = document.createElement("div");
+      top.className = "call-item-top";
 
-    // Телефон
-    const phoneRow = createElement("div", { className: "form-row" });
-    const phoneLabel = createElement("label", {
-      className: "form-label",
-      text: "Номер телефона",
-    });
-    const phoneInput = createElement("input", {
-      className: "form-input",
-      attrs: {
-        type: "tel",
-        required: "required",
-        maxlength: "18", // +7(XXX)-XXX-XX-XX
-      },
-    });
-    phoneRow.appendChild(phoneLabel);
-    phoneRow.appendChild(phoneInput);
-    form.appendChild(phoneRow);
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "call-item-name";
+      nameSpan.textContent = call.name || "Без имени";
 
-    // Результат звонка
-    const resultRow = createElement("div", { className: "form-row" });
-    const resultLabel = createElement("label", {
-      className: "form-label",
-      text: "Результат звонка",
-    });
-    const resultSelect = createElement("select", {
-      className: "form-input",
-      attrs: { required: "required" },
-    });
-    resultSelect.appendChild(
-      createElement("option", { text: "Положительный", attrs: { value: "positive" } })
-    );
-    resultSelect.appendChild(
-      createElement("option", { text: "Отрицательный", attrs: { value: "negative" } })
-    );
-    resultRow.appendChild(resultLabel);
-    resultRow.appendChild(resultSelect);
-    form.appendChild(resultRow);
+      const resultSpan = document.createElement("span");
+      resultSpan.className = `call-item-result call-item-result-${
+        call.result || "positive"
+      }`;
+      resultSpan.textContent =
+        call.result === "negative" ? "Отрицательный" : "Положительный";
 
-    // Причина отказа (для отрицательного звонка)
-    const reasonRow = createElement("div", {
-      className: "form-row",
-      attrs: { "data-field": "reason" },
-    });
-    const reasonLabel = createElement("label", {
-      className: "form-label",
-      text: "Причина отказа",
-    });
-    const reasonSelect = createElement("select", {
-      className: "form-input",
-    });
-    [
-      { value: "", label: "Выберите причину" },
-      { value: "no_answer", label: "Недозвон" },
-      { value: "auto_answer", label: "Автоответчик" },
-      { value: "not_interested", label: "Не интересно" },
-      { value: "already_have", label: "Уже есть" },
-      { value: "other", label: "Другое" },
-    ].forEach((opt) => {
-      reasonSelect.appendChild(
-        createElement("option", { text: opt.label, attrs: { value: opt.value } })
-      );
-    });
-    reasonRow.appendChild(reasonLabel);
-    reasonRow.appendChild(reasonSelect);
-    form.appendChild(reasonRow);
+      top.appendChild(nameSpan);
+      top.appendChild(resultSpan);
 
-    // Комментарий (для "Другое" обязателен)
-    const commentRow = createElement("div", {
-      className: "form-row",
-      attrs: { "data-field": "comment" },
-    });
-    const commentLabel = createElement("label", {
-      className: "form-label",
-      text: "Комментарий",
-    });
-    const commentInput = createElement("textarea", {
-      className: "form-input",
-      attrs: { rows: "2" },
-    });
-    commentRow.appendChild(commentLabel);
-    commentRow.appendChild(commentInput);
-    form.appendChild(commentRow);
+      const bottom = document.createElement("div");
+      bottom.className = "call-item-bottom";
 
-    const actions = createElement("div", { className: "modal-actions" });
-    const btnSave = createElement("button", {
-      className: "btn btn-primary",
-      text: isEdit ? "Сохранить" : "Добавить звонок",
-      attrs: { type: "submit" },
-    });
-    const btnCancel = createElement("button", {
-      className: "btn btn-secondary",
-      text: "Отмена",
-      attrs: { type: "button" },
-    });
-    actions.appendChild(btnSave);
-    actions.appendChild(btnCancel);
+      const phoneSpan = document.createElement("span");
+      phoneSpan.className = "call-item-phone";
+      phoneSpan.textContent = call.phone;
 
-    content.appendChild(title);
-    content.appendChild(form);
-    content.appendChild(actions);
+      const dt = call.createdAt ? new Date(call.createdAt) : new Date();
+      const dateSpan = document.createElement("span");
+      dateSpan.className = "call-item-date";
+      dateSpan.textContent = `${dt
+        .toLocaleDateString("ru-RU")
+        .replace(/\u202F/g, " ")} ${dt
+        .toTimeString()
+        .slice(0, 5)}`;
 
-    const { close } = openModal(content, { maxWidth: "520px" });
+      const commentSpan = document.createElement("span");
+      commentSpan.className = "call-item-comment";
+      commentSpan.textContent = call.comment || "";
 
-    function updateVisibilityByResult() {
-      const isNegative = resultSelect.value === "negative";
-      reasonRow.style.display = isNegative ? "" : "none";
-      const reasonVal = reasonSelect.value;
-      const needComment =
-        isNegative && reasonVal === "other";
-      commentRow.style.display = needComment ? "" : "none";
-    }
+      bottom.appendChild(phoneSpan);
+      bottom.appendChild(dateSpan);
+      bottom.appendChild(commentSpan);
 
-    function updateVisibilityByReason() {
-      const isNegative = resultSelect.value === "negative";
-      const reasonVal = reasonSelect.value;
-      const needComment = isNegative && reasonVal === "other";
-      commentRow.style.display = needComment ? "" : "none";
-    }
+      item.appendChild(top);
+      item.appendChild(bottom);
 
-    resultSelect.addEventListener("change", updateVisibilityByResult);
-    reasonSelect.addEventListener("change", updateVisibilityByReason);
-
-    // Маска телефона
-    phoneInput.addEventListener("input", () => {
-      const digits = phoneInput.value.replace(/\D/g, "");
-      const formatted = formatPhoneNumber(digits);
-      phoneInput.value = formatted;
-    });
-
-    // Префилл при редактировании
-    if (call) {
-      nameInput.value = call.clientName || "";
-      phoneInput.value = call.phoneFormatted || "";
-      resultSelect.value = call.result || "positive";
-      reasonSelect.value = call.refusalReason || "";
-      commentInput.value = call.comment || "";
-      updateVisibilityByResult();
-      updateVisibilityByReason();
-    } else {
-      resultSelect.value = "positive";
-      reasonSelect.value = "";
-      commentInput.value = "";
-      updateVisibilityByResult();
-      updateVisibilityByReason();
-    }
-
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-
-      const clientName = nameInput.value.trim();
-      const phoneFormatted = phoneInput.value.trim();
-      const digits = phoneFormatted.replace(/\D/g, "");
-
-      if (!clientName) {
-        alert("Введите ФИО клиента");
-        return;
-      }
-      if (digits.length !== 11 && digits.length !== 10) {
-        // допустим 10 или 11 цифр, но в России обычно 11 (7 + 10)
-        alert("Введите корректный номер телефона (10–11 цифр)");
-        return;
-      }
-
-      const result = resultSelect.value;
-      let refusalReason = "";
-      let comment = commentInput.value.trim();
-
-      if (result === "negative") {
-        refusalReason = reasonSelect.value;
-        if (!refusalReason) {
-          alert("Выберите причину отказа");
-          return;
-        }
-        if (refusalReason === "other" && !comment) {
-          alert('При выборе "Другое" комментарий обязателен');
-          return;
-        }
-      }
-
-      if (!isEdit) {
-        const newCall = {
-          id: generateId("call"),
-          clientName,
-          phoneRaw: digits,
-          phoneFormatted,
-          result,
-          refusalReason,
-          comment,
-          createdAt: new Date().toISOString(),
-        };
-        state.calls.push(newCall);
-      } else if (call) {
-        call.clientName = clientName;
-        call.phoneRaw = digits;
-        call.phoneFormatted = phoneFormatted;
-        call.result = result;
-        call.refusalReason = refusalReason;
-        call.comment = comment;
-      }
-
-      saveState();
-      renderCallsList();
-      close();
-    });
-
-    btnCancel.addEventListener("click", () => {
-      close();
+      callsList.appendChild(item);
     });
   }
 
-  function openCallDetailsModal(callId) {
-    const call =
-      (state.calls || []).find((c) => c.id === callId) || null;
-    if (!call) return;
+  function formatPhoneRu(value) {
+    const digits = value.replace(/\D/g, "");
+    let clean = digits;
 
-    const content = createElement("div", { className: "modal-card" });
-    const title = createElement("h3", {
-      className: "modal-title",
-      text: "Детали звонка",
-    });
-
-    const info = createElement("div", { className: "details-grid" });
-
-    info.appendChild(createDetailRow("Клиент", call.clientName));
-    info.appendChild(
-      createDetailRow("Телефон", call.phoneFormatted || call.phoneRaw)
-    );
-    info.appendChild(
-      createDetailRow(
-        "Результат",
-        call.result === "positive" ? "Положительный" : "Отрицательный"
-      )
-    );
-    if (call.result === "negative") {
-      info.appendChild(
-        createDetailRow(
-          "Причина отказа",
-          mapRefusalReason(call.refusalReason)
-        )
-      );
+    if (clean.startsWith("8")) {
+      clean = "7" + clean.slice(1);
     }
-    info.appendChild(
-      createDetailRow("Комментарий", call.comment || "—")
-    );
-    info.appendChild(
-      createDetailRow(
-        "Дата и время",
-        call.createdAt
-          ? new Date(call.createdAt).toLocaleString("ru-RU", {
-              day: "2-digit",
-              month: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-            })
-          : ""
-      )
-    );
-
-    const actions = createElement("div", { className: "modal-actions" });
-    const btnEdit = createElement("button", {
-      className: "btn btn-primary",
-      text: "Изменить",
-    });
-    const btnDelete = createElement("button", {
-      className: "btn btn-danger",
-      text: "Удалить",
-    });
-    const btnClose = createElement("button", {
-      className: "btn btn-secondary",
-      text: "Закрыть",
-    });
-
-    actions.appendChild(btnEdit);
-    actions.appendChild(btnDelete);
-    actions.appendChild(btnClose);
-
-    content.appendChild(title);
-    content.appendChild(info);
-    content.appendChild(actions);
-
-    const { close } = openModal(content, { maxWidth: "520px" });
-
-    btnClose.addEventListener("click", () => close());
-    btnEdit.addEventListener("click", () => {
-      close();
-      openCallEditorModal(callId);
-    });
-    btnDelete.addEventListener("click", () => {
-      openConfirmDialog("Вы точно хотите удалить звонок?", () => {
-        state.calls = (state.calls || []).filter((c) => c.id !== callId);
-        saveState();
-        renderCallsList();
-        close();
-      });
-    });
-  }
-
-  function mapRefusalReason(reason) {
-    switch (reason) {
-      case "no_answer":
-        return "Недозвон";
-      case "auto_answer":
-        return "Автоответчик";
-      case "not_interested":
-        return "Не интересно";
-      case "already_have":
-        return "Уже есть";
-      case "other":
-        return "Другое";
-      default:
-        return "—";
+    if (!clean.startsWith("7")) {
+      clean = "7" + clean;
     }
-  }
-
-  function formatPhoneNumber(digits) {
-    // Ожидаем 10 или 11 цифр; если пусто — возвращаем "+7("
-    let d = digits;
-    if (d.length > 11) d = d.slice(-11);
-
-    // Если первая цифра 8, меняем на 7
-    if (d.length === 11 && d[0] === "8") d = "7" + d.slice(1);
-    if (d.length === 10) d = "7" + d; // если ввели 10 цифр, добавим 7 впереди
+    clean = clean.slice(0, 11);
 
     const parts = [];
-    const country = d[0] || "7";
-    parts.push("+", country, "(");
-
-    if (d.length > 1) parts.push(d.slice(1, 4));
-    if (d.length > 4) parts.push(")-", d.slice(4, 7));
-    if (d.length > 7) parts.push("-", d.slice(7, 9));
-    if (d.length > 9) parts.push("-", d.slice(9, 11));
+    parts.push("+7(");
+    if (clean.length > 1) {
+      parts.push(clean.slice(1, 4));
+    } else {
+      parts.push("___");
+    }
+    parts.push(")-");
+    if (clean.length > 4) {
+      parts.push(clean.slice(4, 7));
+    } else {
+      parts.push("___");
+    }
+    parts.push("-");
+    if (clean.length > 7) {
+      parts.push(clean.slice(7, 9));
+    } else {
+      parts.push("__");
+    }
+    parts.push("-");
+    if (clean.length > 9) {
+      parts.push(clean.slice(9, 11));
+    } else {
+      parts.push("__");
+    }
 
     return parts.join("");
   }
 
-  // ---------------------------------------------------------------------------
-  // ГЛОБАЛЬНЫЙ РЕРЕНДЕР
-  // ---------------------------------------------------------------------------
+  function attachCallsHandlers() {
+    if (addCallBtn) {
+      addCallBtn.addEventListener("click", () => {
+        callForm.reset();
+        callReasonWrapper.classList.add("hidden");
+        callCommentWrapper.classList.add("hidden");
+        openModal("call-modal");
+      });
+    }
 
-  function recalcAndRenderAll() {
-    renderCalcView();
-    initCalendar();
-    initDealsView();
-    initCallsView();
+    if (callResultSelect) {
+      callResultSelect.addEventListener("change", () => {
+        if (callResultSelect.value === "negative") {
+          callReasonWrapper.classList.remove("hidden");
+        } else {
+          callReasonWrapper.classList.add("hidden");
+          callCommentWrapper.classList.add("hidden");
+          callReasonSelect.value = "no-answer";
+          callCommentInput.value = "";
+        }
+      });
+    }
+
+    if (callReasonSelect) {
+      callReasonSelect.addEventListener("change", () => {
+        if (callReasonSelect.value === "other") {
+          callCommentWrapper.classList.remove("hidden");
+        } else {
+          callCommentWrapper.classList.add("hidden");
+          callCommentInput.value = "";
+        }
+      });
+    }
+
+    const callPhoneInput = qs("#call-phone");
+    if (callPhoneInput) {
+      callPhoneInput.addEventListener("input", (e) => {
+        const caretEnd = e.target.selectionEnd;
+        const oldLen = e.target.value.length;
+        const formatted = formatPhoneRu(e.target.value);
+        e.target.value = formatted;
+        const diff = formatted.length - oldLen;
+        e.target.setSelectionRange(caretEnd + diff, caretEnd + diff);
+      });
+    }
+
+    if (callForm) {
+      callForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+
+        const name = qs("#call-name").value.trim();
+        const phone = qs("#call-phone").value.trim();
+        const result = callResultSelect.value;
+        const reason = callReasonSelect.value;
+        const comment = callCommentInput.value.trim();
+
+        if (!name) {
+          showToast("Введите ФИО клиента", "error");
+          return;
+        }
+        if (!phone || phone.indexOf("_") !== -1) {
+          showToast("Введите корректный номер телефона", "error");
+          return;
+        }
+
+        if (result === "negative") {
+          if (!reason) {
+            showToast("Выберите причину отказа", "error");
+            return;
+          }
+          if (reason === "other" && !comment) {
+            showToast(
+              "Укажите комментарий при причине 'Другое'",
+              "error"
+            );
+            return;
+          }
+        }
+
+        const call = {
+          id: genId(),
+          name,
+          phone,
+          result,
+          reason: result === "negative" ? reason : null,
+          comment: result === "negative" ? comment : "",
+          createdAt: new Date().toISOString(),
+        };
+
+        state.calls.push(call);
+        saveState();
+        renderCallsList();
+        closeModal("call-modal");
+        showToast("Звонок сохранён", "success");
+      });
+    }
   }
 
-  // ---------------------------------------------------------------------------
-  // ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
-  // ---------------------------------------------------------------------------
+  // ==============================
+  // Редактирование цен
+  // ==============================
 
-  document.addEventListener("DOMContentLoaded", () => {
-    initTabs();
+  function renderPricesModal() {
+    pricesModalBody.innerHTML = "";
 
-    // Кнопка "План"
-    const btnPlan = document.getElementById("btn-open-plan");
-    if (btnPlan) btnPlan.addEventListener("click", openPlanModal);
+    SHELVES_CONFIG.forEach((shelf) => {
+      const block = document.createElement("div");
+      block.className = "prices-shelf-block";
 
-    // Кнопка "Редактировать цены"
-    const btnPrices = document.getElementById("btn-open-prices");
-    if (btnPrices) btnPrices.addEventListener("click", openPricesModal);
+      const title = document.createElement("h3");
+      title.className = "prices-shelf-title";
+      title.textContent = shelf.name;
+      block.appendChild(title);
 
-    recalcAndRenderAll();
-  });
+      shelf.products.forEach((product) => {
+        const row = document.createElement("div");
+        row.className = "prices-row";
+
+        const label = document.createElement("label");
+        label.className = "field-label";
+        label.setAttribute(
+          "for",
+          `price-${shelf.id}-${product.id}`
+        );
+        label.textContent = product.name;
+
+        const field = document.createElement("div");
+        field.className = "field";
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.step = product.type === "percent" ? "0.1" : "50";
+        input.id = `price-${shelf.id}-${product.id}`;
+        input.inputMode = "decimal";
+
+        const value = getProductValue(shelf.id, product.id);
+        input.value = value;
+
+        const suffix = document.createElement("span");
+        suffix.className = "prices-suffix";
+        suffix.textContent =
+          product.type === "percent" ? "% от суммы" : "₽";
+
+        field.appendChild(input);
+        field.appendChild(suffix);
+
+        row.appendChild(label);
+        row.appendChild(field);
+
+        block.appendChild(row);
+      });
+
+      pricesModalBody.appendChild(block);
+    });
+  }
+
+  function savePricesFromModal() {
+    SHELVES_CONFIG.forEach((shelf) => {
+      shelf.products.forEach((product) => {
+        const input = qs(
+          `#price-${shelf.id}-${product.id}`
+        );
+        if (!input) return;
+        const value = parseNumberInput(input.value);
+        setProductOverrideValue(shelf.id, product.id, value);
+      });
+    });
+
+    saveState();
+    renderShelvesInfo();
+    // Новые цены применяются только к новым продажам — старые не пересчитываем
+    showToast("Цены обновлены", "success");
+  }
+
+  // ==============================
+  // Общий итог / премия
+  // ==============================
+
+  function computeMonthStats(year, monthIndex) {
+    const monthKey = getMonthKey(year, monthIndex);
+
+    const monthSales = state.sales.filter((s) =>
+      s.date.startsWith(monthKey)
+    );
+
+    const earningsByShelf = {};
+    monthSales.forEach((s) => {
+      earningsByShelf[s.shelfId] =
+        (earningsByShelf[s.shelfId] || 0) + s.amount;
+    });
+
+    const totalEarnings = monthSales.reduce(
+      (sum, s) => sum + s.amount,
+      0
+    );
+
+    // Кол-во рабочих дней с продажами (не выходные, не кастомный "выходной")
+    const daysWithSalesSet = new Set(
+      monthSales.map((s) => s.date)
+    );
+    let serviceDays = 0;
+    daysWithSalesSet.forEach((dateStr) => {
+      const [y, m, d] = dateStr
+        .split("-")
+        .map((v) => parseInt(v, 10));
+      const dt = new Date(y, m - 1, d);
+      const jsDay = dt.getDay();
+      const weekend = jsDay === 0 || jsDay === 6;
+      const customWeekend = !!state.weekends[dateStr];
+      if (!weekend && !customWeekend) {
+        serviceDays += 1;
+      }
+    });
+
+    const serviceBonus =
+      state.serviceWorker ? SERVICE_DAY_BONUS * serviceDays : 0;
+
+    return {
+      earningsByShelf,
+      totalEarnings,
+      serviceDays,
+      serviceBonus,
+    };
+  }
+
+  function recalcSummary() {
+    const { totalEarnings, serviceBonus } = computeMonthStats(
+      currentYear,
+      currentMonth
+    );
+
+    const { coef } = computeCoefficient();
+
+    const salary = clampNumber(state.salary || 0);
+    const salaryNet = salary * (1 - TAX_RATE);
+
+    const baseForBonus = totalEarnings + serviceBonus;
+    const bonusGross = baseForBonus * coef;
+    const bonusNet = bonusGross * (1 - TAX_RATE);
+
+    if (earnTotalEl) {
+      earnTotalEl.textContent = formatCurrency(totalEarnings);
+    }
+    if (earnServiceEl) {
+      earnServiceEl.textContent = formatCurrency(serviceBonus);
+    }
+    if (coefValueEl) {
+      coefValueEl.textContent = coef.toFixed(1);
+    }
+    if (bonusGrossEl) {
+      bonusGrossEl.textContent = formatCurrency(bonusGross);
+    }
+    if (bonusNetEl) {
+      bonusNetEl.textContent = formatCurrency(bonusNet);
+    }
+    if (totalWithSalaryEl) {
+      totalWithSalaryEl.textContent = formatCurrency(
+        salaryNet + bonusNet
+      );
+    }
+  }
+
+  // ==============================
+  // Вкладки
+  // ==============================
+
+  function attachTabsHandlers() {
+    tabButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tab = btn.dataset.tab;
+        if (!tab) return;
+
+        tabButtons.forEach((b) =>
+          b.classList.remove("active")
+        );
+        btn.classList.add("active");
+
+        tabPanels.forEach((panel) => {
+          panel.classList.toggle(
+            "active",
+            panel.id === `tab-${tab}`
+          );
+        });
+      });
+    });
+  }
+
+  // ==============================
+  // Общие обработчики
+  // ==============================
+
+  function attachGlobalHandlers() {
+    if (salaryInput) {
+      salaryInput.value = state.salary || "";
+      salaryInput.addEventListener("change", () => {
+        const val = parseNumberInput(salaryInput.value);
+        state.salary = val;
+        saveState();
+        recalcSummary();
+      });
+    }
+
+    if (serviceWorkerToggle) {
+      serviceWorkerToggle.checked = !!state.serviceWorker;
+      serviceWorkerToggle.addEventListener("change", () => {
+        state.serviceWorker = serviceWorkerToggle.checked;
+        saveState();
+        recalcSummary();
+      });
+    }
+
+    if (editPlanBtn) {
+      editPlanBtn.addEventListener("click", () => {
+        renderPlanModal();
+        openModal("plan-modal");
+      });
+    }
+
+    if (planSaveBtn) {
+      planSaveBtn.addEventListener("click", () => {
+        savePlanFromModal();
+        closeModal("plan-modal");
+      });
+    }
+
+    if (editPricesBtn) {
+      editPricesBtn.addEventListener("click", () => {
+        renderPricesModal();
+        openModal("prices-modal");
+      });
+    }
+
+    if (pricesSaveBtn) {
+      pricesSaveBtn.addEventListener("click", () => {
+        savePricesFromModal();
+        closeModal("prices-modal");
+      });
+    }
+
+    if (resetDataBtn) {
+      resetDataBtn.addEventListener("click", () => {
+        if (
+          window.confirm(
+            "Вы точно хотите полностью сбросить все данные?"
+          )
+        ) {
+          resetState();
+        }
+      });
+    }
+
+    if (confirmYesBtn) {
+      confirmYesBtn.addEventListener("click", () => {
+        closeModal("confirm-modal");
+        if (pendingDeleteSaleId) {
+          deleteSaleById(pendingDeleteSaleId);
+          pendingDeleteSaleId = null;
+        }
+      });
+    }
+
+    if (confirmNoBtn) {
+      confirmNoBtn.addEventListener("click", () => {
+        pendingDeleteSaleId = null;
+        closeModal("confirm-modal");
+      });
+    }
+  }
+
+  // ==============================
+  // Полный ререндер
+  // ==============================
+
+  function rerenderAll() {
+    ensureMonthPlan(currentYear, currentMonth);
+    renderShelvesInfo();
+    renderPlanProgress();
+    buildCalendar();
+    renderDealsList();
+    renderSalesChart();
+    renderCallsList();
+    recalcSummary();
+  }
+
+  // ==============================
+  // INIT
+  // ==============================
+
+  function init() {
+    attachTabsHandlers();
+    attachGlobalHandlers();
+    attachCalendarHandlers();
+    attachDealsHandlers();
+    attachCallsHandlers();
+    attachModalGlobalHandlers();
+    if (dealsShelfFilter && dealsShelfFilter.options.length === 1) {
+      buildDealsShelfFilterOptions();
+    }
+    rerenderAll();
+  }
+
+  document.addEventListener("DOMContentLoaded", init);
 })();
