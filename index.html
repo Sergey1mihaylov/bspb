@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -11,9 +10,8 @@
   <div class="app">
     <header class="app-header">
       <div class="logo-slot">
-        <!-- Здесь можешь вставить логотип из папки img/ -->
-
-<!-- (Место разрыва) -->
+        <!-- Сюда можешь добавить логотип, например /img/logo.png -->
+        Логотип
       </div>
       <div class="app-header-main">
         <h1>Калькулятор ЗП старшего эксперта</h1>
@@ -25,8 +23,7 @@
         <button id="reset-data-btn" class="btn danger">Сбросить данные</button>
       </div>
     </header>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
     <nav class="tab-bar">
       <button class="tab-btn active" data-tab="calc">Подсчёт</button>
       <button class="tab-btn" data-tab="calendar">Календарь</button>
@@ -34,16 +31,16 @@
     </nav>
 
     <main class="tab-panels">
+      <!-- Вкладка Подсчёт -->
       <section id="tab-calc" class="tab-panel active">
         <div class="summary-grid">
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
           <div class="card">
             <h2>Оклад и режим</h2>
             <div class="field-group">
               <label class="field-label" for="salary-input">Оклад, ₽</label>
               <input id="salary-input" type="number" min="0" step="1000" class="field-input" />
             </div>
+
             <label class="switch-row">
               <span>Сервисный сотрудник (+500 ₽ за рабочий день)</span>
               <label class="switch">
@@ -52,54 +49,58 @@
               </label>
             </label>
           </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
           <div class="card">
             <h2>Итоги месяца</h2>
+
             <div class="stat-row">
               <span>Заработок по полкам</span>
               <strong id="earn-total">0 ₽</strong>
             </div>
+
             <div class="stat-row">
               <span>Сервисный бонус</span>
               <strong id="earn-service">0 ₽</strong>
             </div>
+
             <div class="stat-row">
               <span>Коэффициент</span>
               <strong id="coef-value">0.0</strong>
             </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
             <div class="divider"></div>
+
             <div class="stat-row">
               <span>Премия (до вычета)</span>
               <strong id="bonus-gross">0 ₽</strong>
             </div>
+
             <div class="stat-row">
               <span>Премия «на руки»</span>
               <strong id="bonus-net">0 ₽</strong>
             </div>
+
             <div class="stat-row">
               <span>Оклад + премия «на руки»</span>
               <strong id="total-with-salary">0 ₽</strong>
             </div>
           </div>
         </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
         <div class="layout-two">
           <section class="card">
             <h2>Полки и продукты</h2>
             <div id="shelves-info-container" class="shelves-info"></div>
           </section>
+
           <section class="card">
             <h2>Выполнение плана по полкам</h2>
             <div id="plan-progress-container" class="plan-progress-container"></div>
           </section>
         </div>
       </section>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
+      <!-- Вкладка Календарь -->
       <section id="tab-calendar" class="tab-panel">
         <div class="card">
           <div class="calendar-header">
@@ -110,11 +111,17 @@
             </div>
             <div class="calendar-title" id="calendar-month-label">Месяц Год</div>
           </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
           <div class="calendar-grid-header">
-            <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
+            <span>Пн</span>
+            <span>Вт</span>
+            <span>Ср</span>
+            <span>Чт</span>
+            <span>Пт</span>
+            <span>Сб</span>
+            <span>Вс</span>
           </div>
+
           <div id="calendar-grid" class="calendar-grid"></div>
         </div>
 
@@ -123,8 +130,8 @@
           <canvas id="sales-chart" width="980" height="260"></canvas>
         </div>
       </section>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
+      <!-- Вкладка Мои сделки -->
       <section id="tab-deals" class="tab-panel">
         <div class="card">
           <div class="deals-header">
@@ -133,12 +140,13 @@
               <option value="all">Все полки</option>
             </select>
           </div>
+
           <div id="deals-list" class="deals-list"></div>
         </div>
       </section>
     </main>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
+    <!-- Модалка дня -->
     <div id="day-modal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop"></div>
       <div class="modal-dialog">
@@ -155,8 +163,6 @@
             <label class="switch-row">
               <span>Выходной день</span>
               <label class="switch">
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
                 <input type="checkbox" id="day-weekend-toggle" />
                 <span class="slider"></span>
               </label>
@@ -171,8 +177,6 @@
           <section class="day-form-section">
             <h3>Добавить / изменить продажу</h3>
             <form id="day-sale-form" class="form-grid">
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
               <div class="field-group">
                 <label class="field-label" for="sale-shelf-select">Полка</label>
                 <select id="sale-shelf-select" class="field-input">
@@ -184,8 +188,7 @@
                 <label class="field-label" for="sale-product-select">Продукт</label>
                 <select id="sale-product-select" class="field-input"></select>
               </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
               <div id="sale-insurance-sum-wrapper" class="field-group hidden">
                 <label class="field-label" for="sale-insurance-sum">Сумма страховки, ₽</label>
                 <input id="sale-insurance-sum" type="number" min="0" step="1000" class="field-input" />
@@ -195,8 +198,7 @@
                 <label class="field-label" for="sale-comment">Комментарий</label>
                 <textarea id="sale-comment" rows="2" class="field-input"></textarea>
               </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
               <input type="hidden" id="sale-edit-id" />
 
               <div class="form-actions full">
@@ -208,8 +210,8 @@
         </div>
       </div>
     </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
+    <!-- Модалка редактирования цен -->
     <div id="prices-modal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop"></div>
       <div class="modal-dialog modal-wide">
@@ -223,8 +225,8 @@
         </footer>
       </div>
     </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
+    <!-- Модалка плана -->
     <div id="plan-modal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop"></div>
       <div class="modal-dialog">
@@ -238,8 +240,8 @@
         </footer>
       </div>
     </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
+    <!-- Модалка деталей сделки -->
     <div id="deal-details-modal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop"></div>
       <div class="modal-dialog">
@@ -254,8 +256,8 @@
         </footer>
       </div>
     </div>
-<!-- (Место разрыва) -->
-<!-- (Место разрыва) -->
+
+    <!-- Модалка подтверждения удаления -->
     <div id="confirm-modal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop"></div>
       <div class="modal-dialog">
@@ -272,10 +274,12 @@
       </div>
     </div>
 
+    <!-- Тосты -->
     <div id="toast-container" class="toast-container"></div>
 
+    <!-- Скрипт логики -->
     <script src="scrypt.js"></script>
   </div>
 </body>
 </html>
-<!-- (Место разрыва) -->
+
