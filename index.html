@@ -1,284 +1,165 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <title>Калькулятор ЗП старшего эксперта</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="style.css" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Калькулятор зарплаты старшего эксперта</title>
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div class="app">
-    <header class="app-header">
-      <div class="logo-slot">
-        <!-- Сюда можешь вставить логотип из /img/logo.png -->
-        Логотип
+<header>
+  <div class="logo-placeholder">Логотип</div>
+  <nav>
+    <button id="tab-calc" class="tab-btn active" aria-controls="calc" aria-selected="true">Подсчет</button>
+    <button id="tab-calendar" class="tab-btn" aria-controls="calendar" aria-selected="false">Календарь</button>
+    <button id="tab-deals" class="tab-btn" aria-controls="deals" aria-selected="false">Мои сделки</button>
+    <button id="tab-calls" class="tab-btn" aria-controls="calls" aria-selected="false">Звонки</button>
+  </nav>
+</header>
+
+<main>
+  <section id="calc" class="tab-content active" role="tabpanel" aria-labelledby="tab-calc">
+    <div class="input-group">
+      <label for="salary-input">Оклад (₽):</label>
+      <input type="number" id="salary-input" min="0" value="0" />
+    </div>
+    <div class="input-group service-group">
+      <input type="checkbox" id="service-mode" />
+      <label for="service-mode">Сервисный сотрудник (+500 ₽ в каждый рабочий день)</label>
+    </div>
+    <div class="btn-group">
+      <button id="edit-plan-btn" class="btn">Редактировать план</button>
+      <button id="edit-prices-btn" class="btn">Редактировать цены</button>
+    </div>
+
+    <!-- Модалки -->
+    <div id="plan-editor" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <h2>Редактировать план</h2>
+        <div id="plan-edit-container"></div>
+        <div class="modal-actions">
+          <button id="save-plan-btn" class="btn btn-primary">Сохранить</button>
+          <button id="cancel-plan-btn" class="btn btn-secondary">Отмена</button>
+        </div>
       </div>
-      <div class="app-header-main">
-        <h1>Калькулятор ЗП старшего эксперта</h1>
-        <p class="subtitle">Подсчёт премии, план и календарь продаж</p>
+    </div>
+
+    <div id="prices-editor" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <h2>Редактировать цены</h2>
+        <div id="prices-edit-container"></div>
+        <div class="modal-actions">
+          <button id="save-prices-btn" class="btn btn-primary">Сохранить</button>
+          <button id="cancel-prices-btn" class="btn btn-secondary">Отмена</button>
+        </div>
       </div>
-      <div class="app-header-actions">
-        <button id="edit-prices-btn" class="btn ghost">Редактировать цены</button>
-        <button id="edit-plan-btn" class="btn ghost">План</button>
-        <button id="reset-data-btn" class="btn danger">Сбросить данные</button>
+    </div>
+
+    <div class="results">
+      <div><strong>Коэффициент:</strong> <span id="coef-span">0.00</span></div>
+      <div><strong>Премия:</strong> <span id="premium-span">0 ₽</span></div>
+      <div><strong>Премия на руки (−13% НДФЛ):</strong> <span id="net-span">0 ₽</span></div>
+      <div><strong>Общий заработок (сумма продаж):</strong> <span id="total-earnings-span">0 ₽</span></div>
+    </div>
+
+    <h3>Прогресс по полкам</h3>
+    <div id="progress-container" class="progress-list"></div>
+  </section>
+
+  <section id="calendar" class="tab-content" role="tabpanel" aria-labelledby="tab-calendar" tabindex="0">
+    <div class="month-nav">
+      <button id="prev-month" aria-label="Предыдущий месяц">‹</button>
+      <h2 id="current-month-year"></h2>
+      <button id="next-month" aria-label="Следующий месяц">›</button>
+    </div>
+    <div class="weekdays">
+      <div>Пн</div><div>Вт</div><div>Ср</div><div>Чт</div><div>Пт</div><div>Сб</div><div>Вс</div>
+    </div>
+    <div id="calendar-grid" class="calendar-grid"></div>
+    <!-- Модалка для добавления продаж -->
+    <div id="day-sales-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <h3 id="day-sales-title">Продажи за день</h3>
+        <div id="sales-list"></div>
+        <button id="add-sale-btn" class="btn btn-primary">Добавить продажу</button>
+        <button id="close-day-modal-btn" class="btn btn-secondary">Закрыть</button>
       </div>
-    </header>
+    </div>
 
-    <nav class="tab-bar">
-      <button class="tab-btn active" data-tab="calc">Подсчёт</button>
-      <button class="tab-btn" data-tab="calendar">Календарь</button>
-      <button class="tab-btn" data-tab="deals">Мои сделки</button>
-    </nav>
-
-    <main class="tab-panels">
-      <!-- Вкладка Подсчёт -->
-      <section id="tab-calc" class="tab-panel active">
-        <div class="summary-grid">
-          <div class="card">
-            <h2>Оклад и режим</h2>
-            <div class="field-group">
-              <label class="field-label" for="salary-input">Оклад, ₽</label>
-              <input id="salary-input" type="number" min="0" step="1000" class="field-input" />
-            </div>
-
-            <label class="switch-row">
-              <span>Сервисный сотрудник (+500 ₽ за рабочий день)</span>
-              <label class="switch">
-                <input type="checkbox" id="service-worker-toggle" />
-                <span class="slider"></span>
-              </label>
-            </label>
+    <div id="add-sale-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <h3>Добавить продажу</h3>
+        <form id="add-sale-form">
+          <label for="sale-shelf">Полка:</label>
+          <select id="sale-shelf" required></select>
+          <label for="sale-product">Продукт:</label>
+          <select id="sale-product" required></select>
+          <label for="sale-amount">Сумма (₽):</label>
+          <input type="number" id="sale-amount" min="0" required />
+          <label for="sale-comment">Комментарий:</label>
+          <input type="text" id="sale-comment" maxlength="100" />
+          <div class="modal-actions">
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+            <button type="button" id="cancel-add-sale-btn" class="btn btn-secondary">Отмена</button>
           </div>
+        </form>
+      </div>
+    </div>
+  </section>
 
-          <div class="card">
-            <h2>Итоги месяца</h2>
+  <section id="deals" class="tab-content" role="tabpanel" aria-labelledby="tab-deals" tabindex="0">
+    <h2>Мои сделки</h2>
+    <div class="filter-group">
+      <label for="filter-shelf">Фильтр по полке:</label>
+      <select id="filter-shelf">
+        <option value="">Все</option>
+      </select>
+    </div>
+    <ul id="deals-list" class="deals-list"></ul>
+  </section>
 
-            <div class="stat-row">
-              <span>Заработок по полкам</span>
-              <strong id="earn-total">0 ₽</strong>
-            </div>
+  <section id="calls" class="tab-content" role="tabpanel" aria-labelledby="tab-calls" tabindex="0">
+    <h2>Звонки</h2>
+    <button id="add-call-btn" class="btn btn-primary">Добавить звонок</button>
+    <ul id="calls-list" class="calls-list"></ul>
 
-            <div class="stat-row">
-              <span>Сервисный бонус</span>
-              <strong id="earn-service">0 ₽</strong>
-            </div>
-
-            <div class="stat-row">
-              <span>Коэффициент</span>
-              <strong id="coef-value">0.0</strong>
-            </div>
-
-            <div class="divider"></div>
-
-            <div class="stat-row">
-              <span>Премия (до вычета)</span>
-              <strong id="bonus-gross">0 ₽</strong>
-            </div>
-
-            <div class="stat-row">
-              <span>Премия «на руки»</span>
-              <strong id="bonus-net">0 ₽</strong>
-            </div>
-
-            <div class="stat-row">
-              <span>Оклад + премия «на руки»</span>
-              <strong id="total-with-salary">0 ₽</strong>
-            </div>
-          </div>
-        </div>
-
-        <div class="layout-two">
-          <section class="card">
-            <h2>Полки и продукты</h2>
-            <div id="shelves-info-container" class="shelves-info"></div>
-          </section>
-
-          <section class="card">
-            <h2>Выполнение плана по полкам</h2>
-            <div id="plan-progress-container" class="plan-progress-container"></div>
-          </section>
-        </div>
-      </section>
-
-      <!-- Вкладка Календарь -->
-      <section id="tab-calendar" class="tab-panel">
-        <div class="card">
-          <div class="calendar-header">
-            <div class="calendar-nav">
-              <button id="prev-month-btn" class="icon-btn">&larr;</button>
-              <button id="today-month-btn" class="btn ghost small">Текущий месяц</button>
-              <button id="next-month-btn" class="icon-btn">&rarr;</button>
-            </div>
-            <div class="calendar-title" id="calendar-month-label">Месяц Год</div>
-          </div>
-
-          <div class="calendar-grid-header">
-            <span>Пн</span>
-            <span>Вт</span>
-            <span>Ср</span>
-            <span>Чт</span>
-            <span>Пт</span>
-            <span>Сб</span>
-            <span>Вс</span>
-          </div>
-
-          <div id="calendar-grid" class="calendar-grid"></div>
-        </div>
-
-        <div class="card">
-          <h2>График продаж по будним дням</h2>
-          <canvas id="sales-chart" width="980" height="260"></canvas>
-        </div>
-      </section>
-
-      <!-- Вкладка Мои сделки -->
-      <section id="tab-deals" class="tab-panel">
-        <div class="card">
-          <div class="deals-header">
-            <h2>Мои сделки за месяц</h2>
-            <select id="deals-shelf-filter" class="field-input">
-              <option value="all">Все полки</option>
+    <!-- Модалка добавления звонка -->
+    <div id="add-call-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
+      <div class="modal-content">
+        <h3>Добавить звонок</h3>
+        <form id="add-call-form">
+          <label for="call-fio">ФИО клиента:</label>
+          <input type="text" id="call-fio" required maxlength="100" />
+          <label for="call-phone">Номер телефона:</label>
+          <input type="tel" id="call-phone" placeholder="+7(___)-___-__-__" required pattern="\+7\(\d{3}\)-\d{3}-\d{2}-\d{2}" />
+          <label for="call-result">Результат звонка:</label>
+          <select id="call-result" required>
+            <option value="">Выберите</option>
+            <option value="positive">Положительный</option>
+            <option value="negative">Отрицательный</option>
+          </select>
+          <div id="call-reason-container" class="hidden">
+            <label for="call-reason">Причина отказа:</label>
+            <select id="call-reason">
+              <option value="">Выберите</option>
+              <option value="no-answer">Недозвон</option>
+              <option value="voicemail">Автоответчик</option>
+              <option value="not-interesting">Не интересно</option>
+              <option value="already-have">Уже есть</option>
+              <option value="other">Другое</option>
             </select>
+            <textarea id="call-reason-comment" class="hidden" placeholder="Введите комментарий..." maxlength="200"></textarea>
           </div>
-
-          <div id="deals-list" class="deals-list"></div>
-        </div>
-      </section>
-    </main>
-
-    <!-- Модалка дня -->
-    <div id="day-modal" class="modal hidden" aria-hidden="true">
-      <div class="modal-backdrop"></div>
-      <div class="modal-dialog">
-        <header class="modal-header">
-          <h2 id="day-modal-title">Продажи за день</h2>
-          <button class="icon-btn" data-close-modal="day-modal">✕</button>
-        </header>
-        <div class="modal-body">
-          <div class="day-modal-top">
-            <div class="stat-row">
-              <span>Итого за день</span>
-              <strong id="day-total-amount">0 ₽</strong>
-            </div>
-            <label class="switch-row">
-              <span>Выходной день</span>
-              <label class="switch">
-                <input type="checkbox" id="day-weekend-toggle" />
-                <span class="slider"></span>
-              </label>
-            </label>
+          <div class="modal-actions">
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+            <button type="button" id="cancel-add-call-btn" class="btn btn-secondary">Отмена</button>
           </div>
-
-          <section class="day-sales-section">
-            <h3>Сделки за день</h3>
-            <div id="day-sales-list" class="day-sales-list"></div>
-          </section>
-
-          <section class="day-form-section">
-            <h3>Добавить / изменить продажу</h3>
-            <form id="day-sale-form" class="form-grid">
-              <div class="field-group">
-                <label class="field-label" for="sale-shelf-select">Полка</label>
-                <select id="sale-shelf-select" class="field-input">
-                  <option value="">Выберите полку</option>
-                </select>
-              </div>
-
-              <div id="sale-product-wrapper" class="field-group hidden">
-                <label class="field-label" for="sale-product-select">Продукт</label>
-                <select id="sale-product-select" class="field-input"></select>
-              </div>
-
-              <div id="sale-insurance-sum-wrapper" class="field-group hidden">
-                <label class="field-label" for="sale-insurance-sum">Сумма страховки, ₽</label>
-                <input id="sale-insurance-sum" type="number" min="0" step="1000" class="field-input" />
-              </div>
-
-              <div class="field-group full">
-                <label class="field-label" for="sale-comment">Комментарий</label>
-                <textarea id="sale-comment" rows="2" class="field-input"></textarea>
-              </div>
-
-              <input type="hidden" id="sale-edit-id" />
-
-              <div class="form-actions full">
-                <button type="submit" class="btn primary">Сохранить</button>
-                <button type="button" id="day-sale-cancel-edit-btn" class="btn ghost">Очистить форму</button>
-              </div>
-            </form>
-          </section>
-        </div>
+        </form>
       </div>
     </div>
+  </section>
+</main>
 
-    <!-- Модалка редактирования цен -->
-    <div id="prices-modal" class="modal hidden" aria-hidden="true">
-      <div class="modal-backdrop"></div>
-      <div class="modal-dialog modal-wide">
-        <header class="modal-header">
-          <h2>Редактирование цен продуктов</h2>
-          <button class="icon-btn" data-close-modal="prices-modal">✕</button>
-        </header>
-        <div class="modal-body" id="prices-modal-body"></div>
-        <footer class="modal-footer">
-          <button class="btn primary" id="prices-save-btn">Сохранить</button>
-        </footer>
-      </div>
-    </div>
-
-    <!-- Модалка плана -->
-    <div id="plan-modal" class="modal hidden" aria-hidden="true">
-      <div class="modal-backdrop"></div>
-      <div class="modal-dialog">
-        <header class="modal-header">
-          <h2>План по полкам</h2>
-          <button class="icon-btn" data-close-modal="plan-modal">✕</button>
-        </header>
-        <div class="modal-body" id="plan-modal-body"></div>
-        <footer class="modal-footer">
-          <button class="btn primary" id="plan-save-btn">Сохранить план</button>
-        </footer>
-      </div>
-    </div>
-
-    <!-- Модалка деталей сделки -->
-    <div id="deal-details-modal" class="modal hidden" aria-hidden="true">
-      <div class="modal-backdrop"></div>
-      <div class="modal-dialog">
-        <header class="modal-header">
-          <h2>Детали сделки</h2>
-          <button class="icon-btn" data-close-modal="deal-details-modal">✕</button>
-        </header>
-        <div class="modal-body" id="deal-details-body"></div>
-        <footer class="modal-footer">
-          <button class="btn ghost" id="deal-details-edit-btn">Изменить</button>
-          <button class="btn danger" id="deal-details-delete-btn">Удалить</button>
-        </footer>
-      </div>
-    </div>
-
-    <!-- Модалка подтверждения удаления -->
-    <div id="confirm-modal" class="modal hidden" aria-hidden="true">
-      <div class="modal-backdrop"></div>
-      <div class="modal-dialog">
-        <header class="modal-header">
-          <h2>Удалить продажу?</h2>
-        </header>
-        <div class="modal-body">
-          <p>Вы точно хотите удалить эту продажу?</p>
-        </div>
-        <footer class="modal-footer">
-          <button class="btn danger" id="confirm-yes-btn">Да</button>
-          <button class="btn ghost" id="confirm-no-btn">Нет</button>
-        </footer>
-      </div>
-    </div>
-
-    <!-- Тосты -->
-    <div id="toast-container" class="toast-container"></div>
-
-    <!-- Скрипт логики -->
-    <script src="scrypt.js"></script>
-  </div>
+<script src="app.js" defer></script>
 </body>
 </html>
