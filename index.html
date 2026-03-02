@@ -1,165 +1,365 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Калькулятор зарплаты старшего эксперта</title>
-<link rel="stylesheet" href="style.css" />
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Тайна Союза рыжих</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+:root{--bg:#0f0d0a;--card:#1a1611;--fg:#e2d5c0;--ginger:#cc5500;--ginger-glow:#d4780a;--gold:#c9952b;--border:#2a231a;--muted:#7a6e5f;--red:#c44}
+body{background:var(--bg);color:var(--fg);font-family:'Cormorant Garamond','Times New Roman',serif;font-size:18px;line-height:1.7;min-height:100vh;display:flex;flex-direction:column}
+::selection{background:rgba(204,85,0,.3);color:var(--fg)}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+h1,h2,h3{font-family:'Playfair Display',Georgia,serif;letter-spacing:.02em}
+header{border-bottom:1px solid var(--border);background:var(--card);box-shadow:0 0 60px -10px rgba(204,85,0,.12);display:flex;align-items:center;justify-content:space-between;padding:12px 20px}
+header .title{display:flex;align-items:center;gap:10px}
+header h1{font-size:1.3rem;color:var(--ginger);text-shadow:0 0 20px rgba(204,85,0,.4)}
+.btn-reset{font-family:inherit;font-size:.85rem;color:var(--muted);background:none;border:1px solid var(--border);padding:4px 12px;border-radius:3px;cursor:pointer;transition:.2s}
+.btn-reset:hover{color:var(--ginger);border-color:var(--ginger)}
+.main-wrap{display:flex;flex:1;overflow:hidden}
+.content{flex:1;display:flex;flex-direction:column}
+#narrative{flex:1;overflow-y:auto;padding:24px 32px;max-height:60vh}
+#narrative .inner{max-width:640px;margin:0 auto}
+#narrative p{margin-bottom:8px}
+#narrative strong{color:var(--gold)}
+#narrative em{color:var(--muted)}
+.actions{border-top:1px solid var(--border);background:var(--card);padding:12px 20px}
+.actions-grid{max-width:640px;margin:0 auto;display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.btn{font-family:inherit;font-size:1rem;padding:10px 14px;border:1px solid var(--border);background:var(--card);color:var(--fg);border-radius:3px;cursor:pointer;text-align:left;transition:.2s;width:100%}
+.btn:hover{border-color:var(--ginger);background:rgba(204,85,0,.1)}
+.btn:disabled{opacity:.35;cursor:not-allowed}
+.btn.accent{background:var(--ginger);color:#fff;border-color:var(--ginger);box-shadow:0 0 30px -8px rgba(204,85,0,.3)}
+.btn.accent:hover{filter:brightness(1.1)}
+.sidebar{width:260px;background:var(--card);border-left:1px solid var(--border);padding:16px;overflow-y:auto}
+.sidebar h2{font-size:1.1rem;color:var(--ginger);text-shadow:0 0 20px rgba(204,85,0,.4);margin-bottom:12px}
+.sidebar h3{font-size:.8rem;color:var(--ginger);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 6px}
+.bar-wrap{margin-bottom:14px}
+.bar-label{display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:3px}
+.bar-label span:last-child{color:var(--gold);font-weight:600}
+.bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.bar-fill{height:100%;border-radius:3px;transition:width .5s}
+.bar-fill.ginger{background:var(--ginger)}
+.bar-fill.gold{background:var(--gold)}
+.bar-fill.red{background:var(--red)}
+.clue-list{list-style:none}
+.clue-list li{font-size:.85rem;padding:3px 8px;margin-bottom:3px;background:rgba(204,85,0,.05);border-left:2px solid var(--ginger);border-radius:2px}
+.clue-list li span{color:var(--gold);margin-right:4px}
+.empty{font-size:.85rem;color:var(--muted);font-style:italic}
+/* Modal */
+.overlay{display:none;position:fixed;inset:0;z-index:50;align-items:center;justify-content:center;padding:16px}
+.overlay.open{display:flex}
+.overlay-bg{position:absolute;inset:0;background:rgba(15,13,10,.85);backdrop-filter:blur(4px)}
+.modal{position:relative;background:var(--card);border:1px solid var(--border);border-radius:4px;max-width:480px;width:100%;max-height:80vh;overflow-y:auto;box-shadow:0 4px 40px rgba(0,0,0,.6)}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--card);z-index:1}
+.modal-header h3{font-size:1.1rem;color:var(--ginger)}
+.modal-close{background:none;border:none;color:var(--muted);font-size:1.3rem;cursor:pointer;line-height:1}
+.modal-close:hover{color:var(--fg)}
+.modal-body{padding:12px 16px;display:flex;flex-direction:column;gap:6px}
+.modal-body p{font-size:.9rem;color:var(--muted);margin-bottom:6px}
+.char-meta{display:flex;justify-content:space-between;align-items:center}
+.char-meta small{color:var(--muted);font-size:.8rem}
+/* Mobile sidebar toggle */
+.sidebar-toggle{display:none}
+@media(max-width:768px){
+  .actions-grid{grid-template-columns:repeat(2,1fr)}
+  .sidebar{display:none;position:fixed;inset:0;z-index:40;width:100%}
+  .sidebar.open{display:block}
+  .sidebar-toggle{display:inline-block}
+  #narrative{max-height:50vh;padding:16px}
+}
+</style>
 </head>
 <body>
+
 <header>
-  <div class="logo-placeholder">Логотип</div>
-  <nav>
-    <button id="tab-calc" class="tab-btn active" aria-controls="calc" aria-selected="true">Подсчет</button>
-    <button id="tab-calendar" class="tab-btn" aria-controls="calendar" aria-selected="false">Календарь</button>
-    <button id="tab-deals" class="tab-btn" aria-controls="deals" aria-selected="false">Мои сделки</button>
-    <button id="tab-calls" class="tab-btn" aria-controls="calls" aria-selected="false">Звонки</button>
-  </nav>
+  <div class="title"><span style="font-size:1.5rem">🕯️</span><h1>Тайна Союза рыжих</h1></div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <button class="btn-reset sidebar-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">📋 <span id="clue-badge">0</span></button>
+    <button class="btn-reset" onclick="resetGame()">↻ Начать заново</button>
+  </div>
 </header>
 
-<main>
-  <section id="calc" class="tab-content active" role="tabpanel" aria-labelledby="tab-calc">
-    <div class="input-group">
-      <label for="salary-input">Оклад (₽):</label>
-      <input type="number" id="salary-input" min="0" value="0" />
-    </div>
-    <div class="input-group service-group">
-      <input type="checkbox" id="service-mode" />
-      <label for="service-mode">Сервисный сотрудник (+500 ₽ в каждый рабочий день)</label>
-    </div>
-    <div class="btn-group">
-      <button id="edit-plan-btn" class="btn">Редактировать план</button>
-      <button id="edit-prices-btn" class="btn">Редактировать цены</button>
-    </div>
-
-    <!-- Модалки -->
-    <div id="plan-editor" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
-      <div class="modal-content">
-        <h2>Редактировать план</h2>
-        <div id="plan-edit-container"></div>
-        <div class="modal-actions">
-          <button id="save-plan-btn" class="btn btn-primary">Сохранить</button>
-          <button id="cancel-plan-btn" class="btn btn-secondary">Отмена</button>
-        </div>
+<div class="main-wrap">
+  <div class="content">
+    <div id="narrative"><div class="inner" id="narr-inner"></div></div>
+    <div class="actions">
+      <div class="actions-grid">
+        <button class="btn" onclick="openLocations()">🔍 Осмотреть</button>
+        <button class="btn" onclick="openCharacters()">🗣️ Допросить</button>
+        <button class="btn" onclick="openDocuments()">📄 Документы</button>
+        <button class="btn" id="btn-version" disabled onclick="openEndings()">⚖️ Версия</button>
       </div>
     </div>
+  </div>
+  <div class="sidebar" id="sidebar">
+    <h2>📋 Дело</h2>
+    <div class="bar-wrap"><div class="bar-label"><span>Улики</span><span id="clue-count">0 / 18</span></div><div class="bar"><div class="bar-fill ginger" id="clue-bar" style="width:0%"></div></div><p id="clue-hint" style="font-size:.75rem;color:var(--muted);margin-top:2px">Нужно ≥7 улик для версии</p></div>
+    <div class="bar-wrap"><div class="bar-label"><span>Ходы</span><span id="move-count">0 / 60</span></div><div class="bar"><div class="bar-fill gold" id="move-bar" style="width:0%"></div></div></div>
+    <h3>Собранные улики</h3>
+    <ul class="clue-list" id="clue-list"><li class="empty">Пока ничего не найдено...</li></ul>
+  </div>
+</div>
 
-    <div id="prices-editor" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
-      <div class="modal-content">
-        <h2>Редактировать цены</h2>
-        <div id="prices-edit-container"></div>
-        <div class="modal-actions">
-          <button id="save-prices-btn" class="btn btn-primary">Сохранить</button>
-          <button id="cancel-prices-btn" class="btn btn-secondary">Отмена</button>
-        </div>
-      </div>
-    </div>
+<div class="overlay" id="modal"><div class="overlay-bg" onclick="closeModal()"></div><div class="modal"><div class="modal-header"><h3 id="modal-title"></h3><button class="modal-close" onclick="closeModal()">✕</button></div><div class="modal-body" id="modal-body"></div></div></div>
 
-    <div class="results">
-      <div><strong>Коэффициент:</strong> <span id="coef-span">0.00</span></div>
-      <div><strong>Премия:</strong> <span id="premium-span">0 ₽</span></div>
-      <div><strong>Премия на руки (−13% НДФЛ):</strong> <span id="net-span">0 ₽</span></div>
-      <div><strong>Общий заработок (сумма продаж):</strong> <span id="total-earnings-span">0 ₽</span></div>
-    </div>
+<script>
+// ===== DATA =====
+const CLUES=[
+{id:1,name:"Следы земли в подвале"},{id:2,name:"Инструменты Соколова"},{id:3,name:"Стёртые колени брюк"},
+{id:4,name:"Объявление только для рыжих"},{id:5,name:"Фальшивый устав Союза"},{id:6,name:"Пустой офис Союза"},
+{id:7,name:"Шумы из подвала банка"},{id:8,name:"План здания банка"},{id:9,name:"Французское золото"},
+{id:10,name:"Газетное объявление"},{id:11,name:"Контракт аренды"},{id:12,name:"Подозрительные счета"},
+{id:13,name:"Шифрованные письма"},{id:14,name:"Трещина в стене хранилища"},{id:15,name:"Фотография Россова"},
+{id:16,name:"Архивная статья"},{id:17,name:"Почтовый перевод"},{id:18,name:"Чертежи туннеля"}
+];
+const KEY_CLUES=[1,4,7,10,11,15,18];
+const MAX_MOVES=60, MIN_CLUES=7;
 
-    <h3>Прогресс по полкам</h3>
-    <div id="progress-container" class="progress-list"></div>
-  </section>
+const WELCOME=`Добрый день, детектив.
 
-  <section id="calendar" class="tab-content" role="tabpanel" aria-labelledby="tab-calendar" tabindex="0">
-    <div class="month-nav">
-      <button id="prev-month" aria-label="Предыдущий месяц">‹</button>
-      <h2 id="current-month-year"></h2>
-      <button id="next-month" aria-label="Следующий месяц">›</button>
-    </div>
-    <div class="weekdays">
-      <div>Пн</div><div>Вт</div><div>Ср</div><div>Чт</div><div>Пт</div><div>Сб</div><div>Вс</div>
-    </div>
-    <div id="calendar-grid" class="calendar-grid"></div>
-    <!-- Модалка для добавления продаж -->
-    <div id="day-sales-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
-      <div class="modal-content">
-        <h3 id="day-sales-title">Продажи за день</h3>
-        <div id="sales-list"></div>
-        <button id="add-sale-btn" class="btn btn-primary">Добавить продажу</button>
-        <button id="close-day-modal-btn" class="btn btn-secondary">Закрыть</button>
-      </div>
-    </div>
+Вы получили письмо от мистера Дмитрия Иванова, владельца небольшого ломбарда на Невском проспекте в Санкт-Петербурге. Он обращается к вам с весьма необычным делом.
 
-    <div id="add-sale-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
-      <div class="modal-content">
-        <h3>Добавить продажу</h3>
-        <form id="add-sale-form">
-          <label for="sale-shelf">Полка:</label>
-          <select id="sale-shelf" required></select>
-          <label for="sale-product">Продукт:</label>
-          <select id="sale-product" required></select>
-          <label for="sale-amount">Сумма (₽):</label>
-          <input type="number" id="sale-amount" min="0" required />
-          <label for="sale-comment">Комментарий:</label>
-          <input type="text" id="sale-comment" maxlength="100" />
-          <div class="modal-actions">
-            <button type="submit" class="btn btn-primary">Сохранить</button>
-            <button type="button" id="cancel-add-sale-btn" class="btn btn-secondary">Отмена</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </section>
+Несколько недель назад его помощник, Алексей Соколов, показал ему объявление в газете: некий «Союз рыжих» предлагал хорошо оплачиваемую работу — 4 рубля в неделю за переписывание статей из энциклопедии. Единственное условие — кандидат должен быть рыжеволосым.
 
-  <section id="deals" class="tab-content" role="tabpanel" aria-labelledby="tab-deals" tabindex="0">
-    <h2>Мои сделки</h2>
-    <div class="filter-group">
-      <label for="filter-shelf">Фильтр по полке:</label>
-      <select id="filter-shelf">
-        <option value="">Все</option>
-      </select>
-    </div>
-    <ul id="deals-list" class="deals-list"></ul>
-  </section>
+Иванов, обладатель роскошной рыжей шевелюры, получил место. Каждый день с 10 до 14 часов он исправно являлся в контору Союза и переписывал энциклопедию.
 
-  <section id="calls" class="tab-content" role="tabpanel" aria-labelledby="tab-calls" tabindex="0">
-    <h2>Звонки</h2>
-    <button id="add-call-btn" class="btn btn-primary">Добавить звонок</button>
-    <ul id="calls-list" class="calls-list"></ul>
+Но сегодня утром он обнаружил на дверях конторы записку: «Союз рыжих распущен. 9 октября 1890 года.»
 
-    <!-- Модалка добавления звонка -->
-    <div id="add-call-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-modal="true">
-      <div class="modal-content">
-        <h3>Добавить звонок</h3>
-        <form id="add-call-form">
-          <label for="call-fio">ФИО клиента:</label>
-          <input type="text" id="call-fio" required maxlength="100" />
-          <label for="call-phone">Номер телефона:</label>
-          <input type="tel" id="call-phone" placeholder="+7(___)-___-__-__" required pattern="\+7\(\d{3}\)-\d{3}-\d{2}-\d{2}" />
-          <label for="call-result">Результат звонка:</label>
-          <select id="call-result" required>
-            <option value="">Выберите</option>
-            <option value="positive">Положительный</option>
-            <option value="negative">Отрицательный</option>
-          </select>
-          <div id="call-reason-container" class="hidden">
-            <label for="call-reason">Причина отказа:</label>
-            <select id="call-reason">
-              <option value="">Выберите</option>
-              <option value="no-answer">Недозвон</option>
-              <option value="voicemail">Автоответчик</option>
-              <option value="not-interesting">Не интересно</option>
-              <option value="already-have">Уже есть</option>
-              <option value="other">Другое</option>
-            </select>
-            <textarea id="call-reason-comment" class="hidden" placeholder="Введите комментарий..." maxlength="200"></textarea>
-          </div>
-          <div class="modal-actions">
-            <button type="submit" class="btn btn-primary">Сохранить</button>
-            <button type="button" id="cancel-add-call-btn" class="btn btn-secondary">Отмена</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </section>
-</main>
+Он в растерянности и подозревает неладное. Ваша задача — разобраться, что стоит за этим странным делом.
 
-<script src="app.js" defer></script>
+<strong>Выберите действие из меню ниже.</strong>`;
+
+const LOCATIONS=[
+{id:"lombard",name:"🏪 Ломбард Иванова",unlock:()=>true,scenes:[
+{id:"l1",name:"Осмотреть торговый зал",text:"Небольшой магазин на Невском проспекте. Полки заставлены заложенными вещами — часы, украшения, портсигары. За прилавком — место Иванова. Всё выглядит обычно, но ваш взгляд падает на дверь в подвал...",clues:[]},
+{id:"l2",name:"Спуститься в подвал",text:"Вы спускаетесь по скрипучей лестнице. Воздух сырой и тяжёлый. На полу — свежие следы земли и глины. За ящиками — набор лопат и кирок. Странный инвентарь для ломбарда...",clues:[1,2]},
+{id:"l3",name:"Рабочее место Соколова",text:"Стол помощника аккуратен — слишком аккуратен. Но его запасные брюки сильно стёрты на коленях. Он явно проводил много времени на четвереньках.",clues:[3]}
+]},
+{id:"union",name:"📋 Офис Союза рыжих",unlock:()=>true,scenes:[
+{id:"u1",name:"Осмотреть помещение",text:"Арендованная комната на третьем этаже. Почти пустая — стол, два стула, чернильница. На столе — объявление о вакансии.",clues:[4]},
+{id:"u2",name:"Изучить устав",text:"Устав напечатан на дешёвой бумаге с орфографическими ошибками. Документ явно составлен наспех — это подделка.",clues:[5]},
+{id:"u3",name:"Обыскать комнату",text:"Комната арендована два месяца назад. Нет архивов, списков членов, финансовых документов. «Союз» не вёл никакой реальной деятельности.",clues:[6]}
+]},
+{id:"bank",name:"🏦 Офис банка",unlock:()=>G.flags.includes("merrivezov_interviewed"),scenes:[
+{id:"b1",name:"Поговорить с управляющим",text:"Управляющий подтверждает: в подвале хранится 30 000 французских наполеондоров. По ночам охранники слышали странные стуки из-под земли.",clues:[7,9]},
+{id:"b2",name:"Изучить план здания",text:"Хранилище в подвале — его задняя стена граничит с подвалом ломбарда Иванова. Расстояние — не более 15 метров.",clues:[8]},
+{id:"b3",name:"Осмотреть хранилище",text:"Ряды золотых слитков тускло блестят. Вы проводите рукой по задней стене — свежая трещина, наспех замазанная раствором.",clues:[14]}
+]},
+{id:"flat",name:"🏠 Квартира Соколова",unlock:()=>G.flags.includes("asked_sokolov_address"),scenes:[
+{id:"f1",name:"Обыскать квартиру",text:"В ящике комода — фотография Россова в другой одежде. На обороте: «Джон Клэй, Париж, 1885». Известный международный преступник!",clues:[15]}
+]},
+{id:"archive",name:"📰 Архив газеты",unlock:()=>G.clues.includes(10),scenes:[
+{id:"a1",name:"Искать в архивах",text:"Статья 5-летней давности о попытке ограбления банка в Москве — тот же метод: фальшивая организация, туннель из соседнего здания.",clues:[16]}
+]},
+{id:"post",name:"✉️ Почтовое отделение",unlock:()=>G.clues.includes(13),scenes:[
+{id:"p1",name:"Проверить переводы",text:"Крупный денежный перевод из Парижа на имя Россова. Предположительно — аванс за операцию.",clues:[17]}
+]},
+{id:"warehouse",name:"🏚️ Соседний склад",unlock:()=>G.clues.includes(8),scenes:[
+{id:"w1",name:"Обыскать склад",text:"В дальнем углу — люк. Под ним — начало туннеля. И главное: детальные чертежи подземного хода от ломбарда до хранилища банка!",clues:[18]}
+]},
+{id:"cathedral",name:"⛪ У Казанского собора",unlock:()=>true,scenes:[
+{id:"c1",name:"Осмотреть площадь",text:"Казанский собор возвышается перед вами. Вы замечаете пожилую женщину, тревожно оглядывающуюся. На земле — старинная брошь.",clues:[]},
+{id:"c2",name:"Вернуть брошь старушке",text:"«Благодарю вас! Эта брошь — семейная реликвия. Знаете, этот собор построен в 1801–1811 годах архитектором Воронихиным. Стиль ампир. Здесь покоится великий Кутузов. Берегите себя, детектив.»\n\n<em>Улик не обнаружено, но вы почувствовали дух города.</em>",clues:[]}
+]}
+];
+
+const CHARACTERS=[
+{id:"ivanov",name:"Дмитрий Иванов",title:"Владелец ломбарда",max:5,questions:[
+{id:"iv1",label:"О вакансии в Союзе",fn:c=>c.includes(4)?"«Это было как выигрыш! Но теперь… Странно, что принимали только рыжих. Почему именно рыжих?»":"«Соколов показал объявление. Хорошие деньги за простую работу — переписывать энциклопедию.»"},
+{id:"iv2",label:"О Соколове",fn:()=>"«Прекрасный работник! Работает за полцены. Немного странный — любит сидеть в подвале, говорит, фотографией занимается.»"},
+{id:"iv3",label:"О Россове",fn:()=>"«Россов — тот, кто собеседовал меня. Крупный, рыжеволосый. Весёлый, но настораживал. Говорил с лёгким акцентом — может, французским?»"},
+{id:"iv4",label:"О расписании",fn:()=>"«С 10 до 14 я был в конторе Союза. Ни минутой раньше уйти. Соколов оставался один в ломбарде...»"},
+{id:"iv5",label:"О подвале",fn:c=>c.includes(1)?"«Подвал? Соколов говорил — тёмная комната для фотографий. Земля на полу? Это очень странно.»":"«В подвале Соколов хранит свои вещи.»"}
+]},
+{id:"sokolov",name:"Алексей Соколов",title:"Помощник в ломбарде",max:5,questions:[
+{id:"sk1",label:"О подвале",fn:c=>c.includes(1)?"«Я храню оборудование для фотографии. Земля? С улицы натаскали...» <em>Он нервно потеет.</em>":"«Там мои вещи, ничего интересного.»"},
+{id:"sk2",label:"О Союзе рыжих",fn:()=>"«Просто увидел объявление. Хорошая подработка для хозяина, верно?» <em>Натянуто улыбается.</em>"},
+{id:"sk3",label:"О Россове",fn:()=>"«Россов? Не знаю его. Мы не знакомы.» <em>Но что-то в голосе выдаёт ложь.</em>"},
+{id:"sk4",label:"О стёртых коленях",fn:c=>c.includes(3)?"«Ползаю, ищу вещи на нижних полках!» <em>Под ногтями — грязь.</em>":"«Мои брюки? Что с ними не так?»"},
+{id:"sk5",label:"Спросить адрес",fn:()=>"«Васильевский, 7-я линия, дом 14. А зачем вам?» <em>Он бледнеет.</em>",flags:["asked_sokolov_address"]}
+]},
+{id:"rossov",name:"Россов",title:"Основатель Союза",max:4,questions:[
+{id:"rs1",label:"О фонде Союза",fn:c=>c.includes(5)?"«Спонсорство! Миллионер Хопкинс завещал капитал!» <em>Но вы знаете — устав фальшивый. Он лжёт.</em>":"«Союз рыжих — благотворительная организация. Всё законно!»"},
+{id:"rs2",label:"О закрытии",fn:()=>"«Фонд исчерпан. Бывает.» <em>Старается выглядеть непринуждённо.</em>"},
+{id:"rs3",label:"О связи с Соколовым",fn:()=>"«Соколов? Первый раз слышу.» <em>Слишком быстро отвечает.</em>"},
+{id:"rs4",label:"О настоящей личности",fn:c=>c.includes(15)?"«Я... не понимаю...» <em>Его лицо каменеет. Это Джон Клэй — международный преступник.</em>":"«Моё имя — Россов. Я честный предприниматель.»"}
+]},
+{id:"kuznetsov",name:"Кузнецов",title:"Подручный Россова",max:4,questions:[
+{id:"kz1",label:"О работе",fn:c=>c.includes(7)?"«Грузчик, разнорабочий... Шумы? Не знаю никаких шумов!» <em>Грубо обрывает.</em>":"«Делаю что скажут. Честная работа.»"},
+{id:"kz2",label:"Об инструментах",fn:()=>"«Лопаты? У каждого есть лопаты. В чём-то подозреваете?» <em>Сжимает кулаки.</em>"},
+{id:"kz3",label:"О туннеле",fn:c=>c.includes(18)?"«Т-туннель?!» <em>Побелел как полотно.</em>":"«Не понимаю, о чём вы.»"},
+{id:"kz4",label:"О ночных визитах",fn:()=>"«По ночам я сплю! Отстаньте!»"}
+]},
+{id:"merrivezov",name:"Мерривезеров",title:"Сосед, отставной офицер",max:5,questions:[
+{id:"mr1",label:"О странных шумах",fn:()=>"«Да! По ночам — глухие стуки из-под земли. Слишком громко для крыс. Со стороны банка!»",flags:["merrivezov_interviewed"]},
+{id:"mr2",label:"О Соколове",fn:()=>"«Видел его поздно вечером — входил в ломбард через заднюю дверь. Магазин-то уже закрыт.»"},
+{id:"mr3",label:"О банке",fn:()=>"«Солидное учреждение. Слышал, крупная партия золота из Франции. Охрана усилена, но вход — не единственный путь.»"},
+{id:"mr4",label:"О незнакомцах",fn:()=>"«Рыжеволосый крутился у ломбарда по вечерам. И ещё один — грузил что-то в телегу.»"},
+{id:"mr5",label:"Попросить совет",fn:()=>"«Если кто-то копает туннель — ищите, куда он ведёт. Сходите в банк!»"}
+]}
+];
+
+const DOCUMENTS=[
+{id:"newspaper",name:"📰 Газетное объявление",clues:[10],text:"Пожелтевшая газета. На последней странице:\n\n<em>«СОЮЗ РЫЖИХ РАСПУЩЕН. 9 октября 1890 года.»</em>\n\nКто-то заплатил за это объявление. Зачем ликвидировать организацию так внезапно?"},
+{id:"contract",name:"📜 Контракт аренды",clues:[11],text:"Контракт на аренду офиса Союза. Арендатор — «И. Россов». Но подпись не совпадает с его обычным почерком. Кто подписал?"},
+{id:"bills",name:"💰 Счета за материалы",clues:[12],text:"Кирпич — 200 шт., раствор — 5 пудов, деревянные подпорки — 12 шт. Покупатель — «А. Соколов». Зачем помощнику ломбарда стройматериалы?"},
+{id:"letters",name:"✉️ Шифрованные письма",clues:[13],code:"пятнадцать",text:"Письма с числовыми шифрами. Каждое число — номер буквы в алфавите.\n\nПодсказка: 16-33-20-15-1-5-24-1-20-30\n(а=1, б=2, в=3... я=33)"}
+];
+
+const ENDINGS=[
+{id:"tunnel",label:"🔓 Ограбление через туннель",check:c=>KEY_CLUES.filter(k=>c.includes(k)).length>=5,
+text:`🎉 <strong>ВЕРНО! Вы раскрыли дело!</strong>
+
+Россов — он же Джон Клэй — совместно с Соколовым и Кузнецовым разработал план ограбления банка.
+
+<strong>Схема преступления:</strong>
+1. Соколов устроился в ломбард для доступа к подвалу.
+2. «Союз рыжих» — приманка, чтобы выманивать Иванова на 4 часа.
+3. Пока хозяин переписывал энциклопедию, Соколов рыл туннель к хранилищу банка.
+4. Когда туннель был готов, Союз «распустили».
+
+Полиция устроила засаду. Преступники схвачены. 30 000 наполеондоров в безопасности.
+
+<strong>Блестящая работа, детектив!</strong>`},
+{id:"fraud",label:"💸 Финансовая афера",check:()=>false,
+text:"❌ <strong>Версия неверна.</strong>\n\nФинансовая пирамида не объясняет туннель, стройматериалы и связь с банком. Настоящая цель — ограбление хранилища с золотом.\n\n<em>Соберите больше улик.</em>"},
+{id:"kidnap",label:"👤 Похищение Иванова",check:()=>false,
+text:"❌ <strong>Версия неверна.</strong>\n\nИванова лишь хотели удалить из ломбарда. «Союз» — прикрытие для операции в подвале.\n\n<em>Соберите больше улик.</em>"},
+{id:"counterfeit",label:"🪙 Фальшивомонетничество",check:()=>false,
+text:"❌ <strong>Версия неверна.</strong>\n\nПреступники не делали фальшивые деньги — они хотели украсть настоящее золото.\n\n<em>Соберите больше улик.</em>"}
+];
+
+// ===== STATE =====
+const STORAGE_KEY="redheaded_league";
+let G;
+
+function loadGame(){try{const d=localStorage.getItem(STORAGE_KEY);if(d)return JSON.parse(d)}catch(e){}return{clues:[],flags:[],moves:0,qCounts:{},started:false,ended:false}}
+function saveGame(){localStorage.setItem(STORAGE_KEY,JSON.stringify(G))}
+function resetGame(){if(confirm("Начать заново? Весь прогресс будет потерян.")){G={clues:[],flags:[],moves:0,qCounts:{},started:false,ended:false};saveGame();setNarrative(WELCOME);updateUI();closeModal()}}
+
+// ===== UI =====
+function fmt(t){return t.replace(/\n/g,"<br>")}
+function setNarrative(t){document.getElementById("narr-inner").innerHTML=fmt(t);document.getElementById("narrative").scrollTop=0}
+function updateUI(){
+  const n=G.clues.length;
+  document.getElementById("clue-count").textContent=n+" / 18";
+  document.getElementById("clue-bar").style.width=(n/18*100)+"%";
+  document.getElementById("move-count").textContent=G.moves+" / "+MAX_MOVES;
+  const mp=G.moves/MAX_MOVES*100;
+  const mb=document.getElementById("move-bar");mb.style.width=Math.min(mp,100)+"%";
+  mb.className="bar-fill "+(mp>80?"red":"gold");
+  document.getElementById("clue-badge").textContent=n;
+  document.getElementById("clue-hint").style.display=n>=MIN_CLUES?"none":"block";
+  const vb=document.getElementById("btn-version");
+  if(n>=MIN_CLUES&&!G.ended){vb.disabled=false;vb.className="btn accent"}else{vb.disabled=true;vb.className="btn"}
+  // clue list
+  const cl=document.getElementById("clue-list");
+  if(n===0){cl.innerHTML='<li class="empty">Пока ничего не найдено...</li>'}
+  else{cl.innerHTML=G.clues.map(id=>{const c=CLUES.find(x=>x.id===id);return`<li><span>#${id}</span>${c?c.name:""}</li>`}).join("")}
+}
+
+function addClue(id){if(!G.clues.includes(id)){G.clues.push(id);return true}return false}
+function addFlag(f){if(!G.flags.includes(f))G.flags.push(f)}
+function doMove(){
+  G.moves++;
+  if(G.moves>=MAX_MOVES)setTimeout(()=>alert("⏰ Время истекает! Выдвигайте версию!"),100);
+  if(!G.started)G.started=true;
+  saveGame();updateUI();
+}
+
+// ===== MODAL =====
+function openModal(title,html){document.getElementById("modal-title").textContent=title;document.getElementById("modal-body").innerHTML=html;document.getElementById("modal").classList.add("open")}
+function closeModal(){document.getElementById("modal").classList.remove("open")}
+function btnHTML(text,onclick,cls){return`<button class="btn ${cls||''}" onclick="${onclick}">${text}</button>`}
+
+// ===== LOCATIONS =====
+function openLocations(){
+  const avail=LOCATIONS.filter(l=>l.unlock());
+  let h=avail.map(l=>btnHTML(l.name,`openScenes('${l.id}')`)).join("");
+  if(avail.length<LOCATIONS.length)h+=`<p>🔒 Некоторые локации заблокированы. Допрашивайте свидетелей и изучайте документы.</p>`;
+  openModal("🔍 Осмотреть место",h);
+}
+function openScenes(locId){
+  const loc=LOCATIONS.find(l=>l.id===locId);if(!loc)return;
+  let h=loc.scenes.map(s=>btnHTML(s.name,`doScene('${locId}','${s.id}')`)).join("");
+  openModal(loc.name,h);
+}
+function doScene(locId,sceneId){
+  const loc=LOCATIONS.find(l=>l.id===locId);const sc=loc?.scenes.find(s=>s.id===sceneId);if(!sc)return;
+  doMove();
+  let newC=[];sc.clues.forEach(id=>{if(addClue(id))newC.push("#"+id)});
+  let t=sc.text;if(newC.length)t+=`\n\n🔍 <strong>Новые улики: ${newC.join(", ")}</strong>`;
+  setNarrative(t);saveGame();updateUI();closeModal();
+}
+
+// ===== CHARACTERS =====
+function openCharacters(){
+  let h=CHARACTERS.map(c=>{
+    const cnt=G.qCounts[c.id]||0;const ex=cnt>=c.max;
+    return btnHTML(`<div class="char-meta"><span>${c.name} <small>— ${c.title}</small></span><small>${cnt}/${c.max}</small></div>`,
+      `openQuestions('${c.id}')`,ex?"btn disabled":"");
+  }).join("");
+  openModal("🗣️ Допросить",h);
+}
+function openQuestions(charId){
+  const ch=CHARACTERS.find(c=>c.id===charId);if(!ch)return;
+  let h=ch.questions.map(q=>btnHTML(q.label,`doQuestion('${charId}','${q.id}')`)).join("");
+  openModal(ch.name,h);
+}
+function doQuestion(charId,qId){
+  const ch=CHARACTERS.find(c=>c.id===charId);const q=ch?.questions.find(x=>x.id===qId);if(!ch||!q)return;
+  const cnt=G.qCounts[ch.id]||0;
+  if(cnt>=ch.max){setNarrative(`<em>${ch.name} отворачивается.</em> «Мне нечего больше сказать.»`);closeModal();return}
+  doMove();G.qCounts[ch.id]=(cnt+1);
+  if(q.flags)q.flags.forEach(f=>addFlag(f));
+  let newC=[];if(q.clueIds)q.clueIds.forEach(id=>{if(addClue(id))newC.push("#"+id)});
+  let t=`<strong>${ch.name}</strong> (${ch.title}):\n\n${q.fn(G.clues)}`;
+  if(newC.length)t+=`\n\n🔍 <strong>Новые улики: ${newC.join(", ")}</strong>`;
+  setNarrative(t);saveGame();updateUI();closeModal();
+}
+
+// ===== DOCUMENTS =====
+function openDocuments(){
+  let h=DOCUMENTS.map(d=>btnHTML(d.name,`doDocument('${d.id}')`)).join("");
+  openModal("📄 Документы",h);
+}
+function doDocument(docId){
+  const doc=DOCUMENTS.find(d=>d.id===docId);if(!doc)return;
+  doMove();
+  if(doc.code){
+    const ans=prompt("Введите разгаданное слово (строчными буквами):");
+    if(ans&&ans.trim().toLowerCase()===doc.code){
+      doc.clues.forEach(id=>addClue(id));
+      setNarrative(doc.text+"\n\n✅ <strong>Шифр разгадан! Улика получена.</strong>");
+    }else{
+      setNarrative(doc.text+"\n\n❌ <strong>Неверный ответ. Попробуйте позже.</strong>");
+    }
+  }else{
+    let newC=[];doc.clues.forEach(id=>{if(addClue(id))newC.push("#"+id)});
+    let t=doc.text;if(newC.length)t+=`\n\n🔍 <strong>Новые улики: ${newC.join(", ")}</strong>`;
+    setNarrative(t);
+  }
+  saveGame();updateUI();closeModal();
+}
+
+// ===== ENDINGS =====
+function openEndings(){
+  let h="<p>Выберите вашу версию событий. Будьте внимательны!</p>";
+  h+=ENDINGS.map(e=>btnHTML(e.label,`doEnding('${e.id}')`)).join("");
+  openModal("⚖️ Выдвинуть версию",h);
+}
+function doEnding(eid){
+  const e=ENDINGS.find(x=>x.id===eid);if(!e)return;
+  G.ended=true;saveGame();updateUI();
+  setNarrative(e.text);closeModal();
+}
+
+// ===== INIT =====
+G=loadGame();
+setNarrative(G.started?"Продолжайте расследование, детектив. Выберите действие.":WELCOME);
+updateUI();
+</script>
 </body>
 </html>
+
